@@ -207,7 +207,8 @@ jobs:
               fi ;;
             *) echo "::error::Unknown image source $SOURCE"; exit 1 ;;
           esac
-          commit=$(docker buildx imagetools inspect "$IMAGE@$digest" --format '{{index (index .Image "linux/amd64").Config.Labels "org.opencontainers.image.revision"}}')
+          commit=$(docker buildx imagetools inspect "$IMAGE@$digest" --format '{{json .Image}}' \
+            | jq -r '(if has("config") then . else .["linux/amd64"] end).config.Labels["org.opencontainers.image.revision"] // empty')
           [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::$IMAGE@$digest has no commit in its revision label"; exit 1; }
           case "$SOURCE" in
             push) [ "$commit" = "$GITHUB_SHA" ] || { echo "::error::$IMAGE:$tag was built from $commit, not $GITHUB_SHA"; exit 1; } ;;
