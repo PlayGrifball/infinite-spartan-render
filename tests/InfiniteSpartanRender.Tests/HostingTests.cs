@@ -140,10 +140,12 @@ public class HostingTests
             ["ForwardLimit"] = "2",
         }).Build();
         var options = new ForwardedHeadersOptions();
+        var defaults = options.KnownIPNetworks.Count;
 
         ForwardedHeadersSetup.Apply(options, config);
 
-        Assert.That(options.KnownIPNetworks, Has.Count.EqualTo(1));
+        Assert.That(options.KnownIPNetworks, Has.Count.EqualTo(defaults + 1));
+        Assert.That(options.KnownIPNetworks.Select(n => n.ToString()), Does.Contain("10.42.0.0/16"));
         Assert.That(options.KnownProxies.Select(p => p.ToString()), Does.Contain("192.168.1.1"));
         Assert.That(options.ForwardLimit, Is.EqualTo(2));
     }
