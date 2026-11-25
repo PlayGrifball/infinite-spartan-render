@@ -19,7 +19,7 @@ RUN curl -fsSL -o /tmp/blender.tar.xz https://mirror.clarkson.edu/blender/releas
 RUN git clone https://github.com/TheHaloArchive/ekur /opt/ekur && git -C /opt/ekur checkout "${EKUR_COMMIT}" \
     && git -C /opt/ekur submodule update --init --recursive
 RUN cd /opt/ekur/addon && HOME=/tmp/h /opt/blender/blender --command extension build --output-dir /tmp \
-    && HOME=/opt/blenderhome /opt/blender/blender --command extension install-file -r user_default -e /tmp/ekur-*.zip
+    && HOME=/opt/blenderhome /opt/blender/blender --command extension install-file -r user_default /tmp/ekur-*.zip
 COPY blender/bake.py /tmp/bake.py
 RUN HOME=/opt/blenderhome /opt/blender/blender -b --python /tmp/bake.py && chmod -R a+rX /opt/blenderhome
 
