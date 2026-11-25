@@ -42,7 +42,7 @@ jobs:
       - name: Run it read-only, probe /health/live, and check Ekur loads in Blender
         run: |
           set -euo pipefail
-          docker run -d --name isr --read-only --tmpfs /tmp -p 18080:8080 isr:smoke
+          docker run -d --name isr --read-only --tmpfs /tmp --tmpfs /cache:uid=1654 -p 18080:8080 isr:smoke
           for i in $(seq 1 60); do
             if curl -fsS http://localhost:18080/health/live; then echo; ok=1; break; fi
             sleep 2
