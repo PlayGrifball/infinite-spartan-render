@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/InfiniteSpartanRender/InfiniteSpartanRender.csproj" />
+  <Project Path="tests/InfiniteSpartanRender.Tests/InfiniteSpartanRender.Tests.csproj" />
+</Solution>
