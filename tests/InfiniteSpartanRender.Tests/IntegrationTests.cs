@@ -37,6 +37,15 @@ public class IntegrationTests
         if (_work.Length > 0 && Directory.Exists(_work)) Directory.Delete(_work, recursive: true);
     }
 
+    // The CI job uploads this folder, so a person can look at the renders.
+    private static void Keep(string output)
+    {
+        var folder = Environment.GetEnvironmentVariable("ISR_ARTIFACTS");
+        if (string.IsNullOrEmpty(folder)) return;
+        Directory.CreateDirectory(folder);
+        File.Copy(output, Path.Combine(folder, Path.GetFileName(output)), overwrite: true);
+    }
+
     [Test]
     public async Task ADefaultMarkVII_RendersAPng()
     {
@@ -44,6 +53,7 @@ public class IntegrationTests
 
         await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "png", Size = "small" }, output, CancellationToken.None);
 
+        Keep(output);
         var bytes = await File.ReadAllBytesAsync(output);
         Assert.That(bytes.AsSpan(0, 8).ToArray(), Is.EqualTo(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }), "PNG signature");
         Assert.That(bytes.Length, Is.GreaterThan(20_000), "a Spartan, not an empty frame");
@@ -56,6 +66,7 @@ public class IntegrationTests
 
         await _runner.RunAsync(new Loadout { Core = "Yoroi", Output = "glb" }, output, CancellationToken.None);
 
+        Keep(output);
         var bytes = await File.ReadAllBytesAsync(output);
         Assert.That(System.Text.Encoding.ASCII.GetString(bytes, 0, 4), Is.EqualTo("glTF"));
         Assert.That(bytes.Length, Is.GreaterThan(100_000));
