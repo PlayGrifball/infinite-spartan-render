@@ -4,6 +4,7 @@ description: >-
   Infinite Spartan Render: a job API that renders a Halo Infinite Spartan loadout to a PNG, or exports a GLB, with
   headless Blender and Ekur from game data mounted read-only.
 type: application
+# The publish workflow replaces the patch number with the run number.
 version: 0.1.0
 kubeVersion: ">=1.30.0-0"
 appVersion: "latest"
