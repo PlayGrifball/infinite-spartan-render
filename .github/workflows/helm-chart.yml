@@ -1,11 +1,21 @@
 name: Helm chart
 
+# charts/infinite-spartan-render: lint, helm-unittest, kubeconform (oldest/newest Kubernetes), the release scripts' tests,
+# and, on main, publishing the chart signed (cosign keyless) to oci://ghcr.io/playgrifball/charts as
+# infinite-spartan-render:<x.y>.<run number> whenever the chart or the service changed since the last release, with the
+# image it runs baked in by digest: image.yml's signed sha-<this commit> when this push changed the service (waiting for
+# it), else its signed main image. So one chart version is one release of everything deployed. Then a GitHub release for
+# that version, tagged infinite-spartan-render-<version> (the <chart>-<version> tag Renovate matches to show release
+# notes on chart bumps), listing the chart's and the service's commits since the previous one, the image and the chart
+# (.github/scripts/chart-release-notes.mjs), followed by one atomic deployment commit at the deploy/current tag: the
+# chart from this source commit plus a values file pinning that release's image digest. The homelab follows that ref.
+
 on:
   pull_request:
-    paths: ["charts/**", ".github/workflows/helm-chart.yml"]
+    paths: ["charts/**", "src/**", "blender/**", "Dockerfile", ".dockerignore", "global.json", "InfiniteSpartanRender.slnx", ".github/workflows/image.yml", ".github/workflows/helm-chart.yml", ".github/scripts/**"]
   push:
     branches: [main]
-    paths: ["charts/**", ".github/workflows/helm-chart.yml"]
+    paths: ["charts/**", "src/**", "blender/**", "Dockerfile", ".dockerignore", "global.json", "InfiniteSpartanRender.slnx", ".github/workflows/image.yml", ".github/workflows/helm-chart.yml", ".github/scripts/**"]
   workflow_dispatch:
 
 permissions:
@@ -17,6 +27,11 @@ concurrency:
 
 env:
   CHART: charts/infinite-spartan-render
+  REGISTRY: ghcr.io
+  CHART_REPO: oci://ghcr.io/playgrifball/charts
+  IMAGE: ghcr.io/playgrifball/infinite-spartan-render
+  # image.yml's keyless signature on main, which the image the chart runs must carry
+  IMAGE_IDENTITY: ^https://github\.com/PlayGrifball/infinite-spartan-render/\.github/workflows/image\.yml@refs/heads/main$
   KUBERNETES_OLDEST: "1.30.0"
   KUBERNETES_NEWEST: "1.34.0"
 
@@ -26,6 +41,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
 
       - name: Lint
         run: |
@@ -43,6 +61,9 @@ jobs:
           helm plugin install https://github.com/helm-unittest/helm-unittest $verify
           helm unittest "$CHART"
 
+      - name: Release and deployment tests
+        run: node --test .github/scripts/chart-release-notes.test.mjs .github/scripts/isr-deploy.test.mjs
+
       - name: Schema check
         run: |
           set -euo pipefail
@@ -57,3 +78,237 @@ jobs:
               echo "::endgroup::"
             done
           done
+
+  publish:
+    needs: [test]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    env:
+      IDENTITY: ^https://github\.com/${{ github.repository }}/\.github/workflows/helm-chart\.yml@refs/heads/main$
+    # version and digest are set only when a version is ready for its release: published and signed by this run, or by
+    # an earlier attempt of it (a re-run); the release job runs on them
+    outputs:
+      version: ${{ steps.publish.outputs.version || steps.existing.outputs.version }}
+      digest: ${{ steps.publish.outputs.digest || steps.existing.outputs.digest }}
+      image: ${{ steps.image.outputs.ref }}
+      image-digest: ${{ steps.image.outputs.digest }}
+      image-commit: ${{ steps.image.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.4
+
+      # The version is <x.y>.<run number>, so it exists only when an earlier attempt of this run pushed it: then it is
+      # released as it is, with no change check and no image wait
+      - name: Version
+        id: version
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "$TOKEN" | helm registry login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          echo "$TOKEN" | cosign login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          base=$(sed -n 's/^version: *//p' "$CHART/Chart.yaml")
+          version="${base%.*}.${{ github.run_number }}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if helm show chart "$CHART_REPO/infinite-spartan-render" --version "$version" > /dev/null 2>&1; then
+            echo "infinite-spartan-render $version is already published (an earlier attempt of this run): releasing it as it is."
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A re-run: the chart that attempt pushed, signed by this workflow (signed now if that attempt stopped before it)
+      - name: The published version
+        id: existing
+        if: steps.version.outputs.published == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p pulled
+          helm pull "$CHART_REPO/infinite-spartan-render" --version "$VERSION" -d pulled 2>&1 | tee pull.txt
+          digest=$(sed -n 's/^Digest: *//p' pull.txt)
+          test -n "$digest"
+          ref="${CHART_REPO#oci://}/infinite-spartan-render@$digest"
+          verify() { cosign verify "$ref" --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null; }
+          if ! verify; then
+            echo "infinite-spartan-render $VERSION has no valid signature from this workflow: signing $digest."
+            cosign sign --yes "$ref"
+            verify
+          fi
+          helm show values "pulled/infinite-spartan-render-$VERSION.tgz" > baked.yaml
+          { echo "version=$VERSION"; echo "digest=$digest"
+            echo "image-tag=$(yq -r '.image.tag' baked.yaml)"; echo "image-digest=$(yq -r '.image.digest' baked.yaml)"; } >> "$GITHUB_OUTPUT"
+
+      # Whether to publish: anything in the chart or the service since the last release (so a replaced pending run's
+      # changes still publish), and which image (this push's own when it changed the service, else the main image)
+      - name: Did the chart or the service change?
+        id: plan
+        if: steps.version.outputs.published != 'true'
+        env:
+          BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+        run: |
+          set -euo pipefail
+          node .github/scripts/chart-release-notes.mjs --plan --chart "$CHART" --name infinite-spartan-render --before "$BEFORE" | tee -a "$GITHUB_OUTPUT"
+
+      # The image the chart runs, signed by image.yml on main, by digest, with its commit from its revision label:
+      # - push: this push changed the service, so image.yml builds it as sha-<this commit>. Waits for it to be
+      #   pushed and signed, unless a newer push changes the service (its chart run then publishes the newer image).
+      # - main: the image image.yml last published, tagged main.
+      # - a re-run: the image baked into the published version.
+      - name: The service image
+        id: image
+        if: steps.version.outputs.published == 'true' || steps.plan.outputs.publish == 'true'
+        env:
+          SOURCE: ${{ steps.version.outputs.published == 'true' && 'baked' || steps.plan.outputs.image }}
+          BAKED_TAG: ${{ steps.existing.outputs.image-tag }}
+          BAKED_DIGEST: ${{ steps.existing.outputs.image-digest }}
+        run: |
+          set -euo pipefail
+          signed() { cosign verify "$IMAGE@$1" --certificate-identity-regexp "$IMAGE_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null 2>&1; }
+          resolve() { docker buildx imagetools inspect "$IMAGE:$1" --format '{{.Manifest.Digest}}' 2>/dev/null; }
+          case "$SOURCE" in
+            push)
+              tag="sha-${GITHUB_SHA:0:7}"
+              for attempt in $(seq 1 80); do
+                if digest=$(resolve "$tag") && [ -n "$digest" ] && signed "$digest"; then break; fi
+                digest=
+                git fetch -q origin main
+                newer=$(git rev-parse FETCH_HEAD)
+                if [ "$newer" != "$GITHUB_SHA" ] && [ "$(node .github/scripts/chart-release-notes.mjs --superseded --since "$GITHUB_SHA" --newer "$newer")" = true ]; then
+                  echo "::notice::main is at $newer, which changes the service again: its run publishes the chart with that image. Not publishing."
+                  exit 0
+                fi
+                echo "Waiting for image.yml to push and sign $IMAGE:$tag ($attempt/80)"
+                sleep 30
+              done
+              [ -n "$digest" ] || { echo "::error::$IMAGE:$tag was not pushed and signed within 40 minutes"; exit 1; } ;;
+            main)
+              digest=$(resolve main)
+              if [ -z "$digest" ] || ! signed "$digest"; then
+                echo "::error::$IMAGE:main ($digest) has no valid signature from image.yml"; exit 1
+              fi ;;
+            baked)
+              tag="$BAKED_TAG"; digest="$BAKED_DIGEST"
+              if [ -z "$digest" ] || ! signed "$digest"; then
+                echo "::error::The baked image $IMAGE@$digest has no valid signature from image.yml"; exit 1
+              fi ;;
+            *) echo "::error::Unknown image source $SOURCE"; exit 1 ;;
+          esac
+          commit=$(docker buildx imagetools inspect "$IMAGE@$digest" --format '{{index (index .Image "linux/amd64").Config.Labels "org.opencontainers.image.revision"}}')
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::$IMAGE@$digest has no commit in its revision label"; exit 1; }
+          case "$SOURCE" in
+            push) [ "$commit" = "$GITHUB_SHA" ] || { echo "::error::$IMAGE:$tag was built from $commit, not $GITHUB_SHA"; exit 1; } ;;
+            main)
+              tag="sha-${commit:0:7}"
+              mapfile -t paths < <(node .github/scripts/chart-release-notes.mjs --print-image-paths)
+              if ! git cat-file -e "$commit^{commit}" 2>/dev/null || ! git diff --quiet "$commit" HEAD -- "${paths[@]}"; then
+                echo "::warning::$IMAGE:main is built from $commit, and the service has changed since: the chart runs that image until image.yml publishes a newer one."
+              fi ;;
+            *) ;; # baked: the published version's own image, as it is
+          esac
+          { echo "ref=$IMAGE:$tag"; echo "tag=$tag"; echo "digest=$digest"; echo "commit=$commit"; } >> "$GITHUB_OUTPUT"
+          echo "The chart runs $IMAGE:$tag ($digest), built from $commit."
+
+      - name: Publish and sign
+        id: publish
+        if: steps.version.outputs.published != 'true' && steps.image.outputs.digest != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          # The image, baked in: the chart runs repository@digest, and the tag is its version label
+          sed -i -E "/^image:/,/^[^ #]/{s/^  tag: .*/  tag: \"$IMAGE_TAG\"/;s/^  digest: .*/  digest: \"$IMAGE_DIGEST\"/}" "$CHART/values.yaml"
+          sed -i -E "s/^appVersion: .*/appVersion: \"$IMAGE_TAG\"/" "$CHART/Chart.yaml"
+          grep -qx "  digest: \"$IMAGE_DIGEST\"" "$CHART/values.yaml"
+          helm package "$CHART" --version "$VERSION" -d dist
+          helm push "dist/infinite-spartan-render-$VERSION.tgz" "$CHART_REPO" 2>&1 | tee push.txt
+          digest=$(sed -n 's/^Digest: *//p' push.txt)
+          test -n "$digest"
+          ref="${CHART_REPO#oci://}/infinite-spartan-render@$digest"
+          cosign sign --yes "$ref"
+          cosign verify "$ref" --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          { echo "version=$VERSION"; echo "digest=$digest"; } >> "$GITHUB_OUTPUT"
+          {
+            echo "Published and signed $CHART_REPO/infinite-spartan-render:$VERSION ($digest)."
+            echo
+            echo "Verify: cosign verify ${ref%@*}:$VERSION --certificate-identity-regexp '$IDENTITY' --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # A GitHub release for the version publish pushed, so Renovate shows release notes on chart bumps: Renovate matches a
+  # release whose tag is <chart>-<version> for an OCI chart. Never marked the repository's latest release. On a re-run
+  # it updates the release's notes, and fails if the tag points at another commit.
+  release:
+    needs: [publish]
+    if: needs.publish.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          DIGEST: ${{ needs.publish.outputs.digest }}
+          IMAGE_REF: ${{ needs.publish.outputs.image }}
+          IMAGE_DIGEST: ${{ needs.publish.outputs.image-digest }}
+          IMAGE_COMMIT: ${{ needs.publish.outputs.image-commit }}
+          IDENTITY: ^https://github\.com/${{ github.repository }}/\.github/workflows/helm-chart\.yml@refs/heads/main$
+        run: |
+          set -euo pipefail
+          tag="infinite-spartan-render-$VERSION"
+          git fetch --tags --force origin
+          node .github/scripts/chart-release-notes.mjs --chart "$CHART" --name infinite-spartan-render --version "$VERSION" \
+            --repository "$GITHUB_REPOSITORY" --chart-repo "$CHART_REPO" --digest "$DIGEST" --identity "$IDENTITY" \
+            --image "$IMAGE_REF" --image-digest "$IMAGE_DIGEST" --image-commit "$IMAGE_COMMIT" --image-identity "$IMAGE_IDENTITY" > notes.md
+          if at=$(git rev-parse -q --verify "refs/tags/$tag^{commit}"); then
+            test "$at" = "$GITHUB_SHA" || { echo "::error::$tag already points at $at, not $GITHUB_SHA"; exit 1; }
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "infinite-spartan-render $VERSION" --notes-file notes.md --latest=false
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --title "infinite-spartan-render $VERSION" --notes-file notes.md --latest=false
+          fi
+          echo "Released $tag: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
+
+  # One deployment lane. The synthetic commit keeps the chart source and this release's exact image digest together;
+  # the homelab's Argo CD Application follows deploy/current.
+  deploy:
+    needs: [publish, release]
+    if: needs.publish.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Move deploy/current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          .github/scripts/isr-deploy.sh "$GITHUB_SHA"
+          "${{ needs.publish.outputs.image }}"
+          "${{ needs.publish.outputs.image-digest }}"
+          "${{ needs.publish.outputs.version }}"
