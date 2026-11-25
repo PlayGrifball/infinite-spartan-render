@@ -41,7 +41,7 @@ public static class ForwardedHeadersSetup
     {
         options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
         foreach (var network in section.GetSection("KnownIPNetworks").Get<string[]>() ?? [])
-            if (IPNetwork.TryParse(network, out var parsed)) options.KnownIPNetworks.Add(parsed);
+            if (System.Net.IPNetwork.TryParse(network, out var parsed)) options.KnownIPNetworks.Add(parsed);
         foreach (var proxy in section.GetSection("KnownProxies").Get<string[]>() ?? [])
             if (IPAddress.TryParse(proxy, out var address)) options.KnownProxies.Add(address);
         if (section["ForwardedForHeaderName"] is { Length: > 0 } header) options.ForwardedForHeaderName = header;
