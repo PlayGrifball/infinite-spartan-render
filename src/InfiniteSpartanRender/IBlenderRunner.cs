@@ -15,6 +15,7 @@ public sealed class RenderOptions
     public string BlenderPath { get; set; } = "/opt/blender/blender";
     public string ScriptPath { get; set; } = "/app/blender/spartan.py";
     public string CacheDirectory { get; set; } = "/cache";
+    public string DataDirectory { get; set; } = "/data";
     public string WorkDirectory { get; set; } = "/tmp/render";
     public int MaxConcurrentJobs { get; set; } = 1;
     public int MaxQueued { get; set; } = 20;
@@ -44,6 +45,7 @@ public sealed class BlenderRunner(IOptions<RenderOptions> options) : IBlenderRun
             foreach (var arg in new[] { "-b", "--factory-startup", "--python", o.ScriptPath, "--", loadoutPath, outputPath })
                 start.ArgumentList.Add(arg);
             start.Environment["HOME"] = work;
+            start.Environment["ISR_DATA"] = o.DataDirectory;
 
             using var process = Process.Start(start) ?? throw new InvalidOperationException("Blender did not start");
             var tail = new Queue<string>();

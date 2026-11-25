@@ -1,0 +1,8 @@
+Infinite Spartan Render {{ include "infinite-spartan-render.fullname" . }} in {{ .Release.Namespace }}.
+
+API: http://{{ include "infinite-spartan-render.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/ (Swagger UI at /swagger).
+Game data: PersistentVolumeClaim {{ .Values.data.claimName }}, mounted read-only at /data.
+{{- if not .Values.telemetry.enabled }}
+
+NOTE: telemetry is disabled. The service serves no /metrics; metrics and traces leave it only over OTLP (telemetry.endpoint).
+{{- end }}

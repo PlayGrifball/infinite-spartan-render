@@ -1,0 +1,59 @@
+name: Helm chart
+
+on:
+  pull_request:
+    paths: ["charts/**", ".github/workflows/helm-chart.yml"]
+  push:
+    branches: [main]
+    paths: ["charts/**", ".github/workflows/helm-chart.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helm-chart-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CHART: charts/infinite-spartan-render
+  KUBERNETES_OLDEST: "1.30.0"
+  KUBERNETES_NEWEST: "1.34.0"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Lint
+        run: |
+          set -euo pipefail
+          for values in "$CHART"/ci/*-values.yaml; do
+            echo "::group::helm lint -f $values"
+            helm lint "$CHART" --strict -f "$values"
+            echo "::endgroup::"
+          done
+
+      - name: Unit tests
+        run: |
+          set -euo pipefail
+          if helm version --short | grep -q '^v3'; then verify=; else verify=--verify=false; fi
+          helm plugin install https://github.com/helm-unittest/helm-unittest $verify
+          helm unittest "$CHART"
+
+      - name: Schema check
+        run: |
+          set -euo pipefail
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          for k8s in "$KUBERNETES_OLDEST" "$KUBERNETES_NEWEST"; do
+            for values in "$CHART"/ci/*-values.yaml; do
+              echo "::group::$values, Kubernetes $k8s"
+              helm template ci "$CHART" -n spartan -f "$values" --kube-version "$k8s" \
+                | ./kubeconform -strict -summary -kubernetes-version "$k8s" \
+                    -schema-location default \
+                    -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+              echo "::endgroup::"
+            done
+          done

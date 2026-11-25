@@ -1,0 +1,52 @@
+{{- $p := .Values.prometheusRule -}}
+{{- if $p.enabled }}
+{{- if not .Values.telemetry.enabled }}{{ fail "prometheusRule needs telemetry.enabled: the metrics reach Prometheus only by OTLP push" }}{{ end }}
+{{- /*
+Pushed over OTLP to a collector that promotes resource attributes to labels: every series carries k8s_namespace_name and
+job = "[<service.namespace>/]<service.name>". Counter spartan_render.jobs arrives as spartan_render_jobs_total{outcome},
+the histogram as spartan_render_duration_seconds_*, the gauge as spartan_render_queue_depth.
+*/}}
+{{- $sel := include "infinite-spartan-render.metricsSelector" . }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "infinite-spartan-render.fullname" . }}
+  labels:
+    {{- include "infinite-spartan-render.labels" . | nindent 4 }}
+    {{- with $p.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: infinite-spartan-render
+      rules:
+        - alert: SpartanRendersFailing
+          expr: |
+            sum(increase(spartan_render_jobs_total{ {{- $sel -}} ,outcome="failed"}[{{ $p.failedWindow }}]) or vector(0)) >= {{ $p.failedRenders }}
+          labels:
+            severity: warning
+          annotations:
+            summary: Spartan renders keep failing
+            description: >-
+              At least {{ $p.failedRenders }} renders failed in {{ $p.failedWindow }} in {{ .Release.Namespace }}. The pod's log
+              has Blender's last lines for each; a mounted data volume that lacks files, or Blender running out of memory, are the usual causes.
+        - alert: SpartanRenderQueueBackedUp
+          expr: max(spartan_render_queue_depth{ {{- $sel -}} }) >= {{ $p.queueDepth }}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: Spartan renders are queueing up
+            description: >-
+              {{ $p.queueDepth }} or more renders have waited for a slot for 15 minutes; new requests are answered 503 once the queue is full.
+        - alert: SpartanRenderMetricsAbsent
+          expr: absent(spartan_render_queue_depth{ {{- $sel -}} })
+          for: {{ $p.absentFor }}
+          labels:
+            severity: warning
+          annotations:
+            summary: No metrics from the Spartan render service
+            description: >-
+              The service in {{ .Release.Namespace }} has pushed no metrics for {{ $p.absentFor }}: it is down, or its OTLP export
+              (telemetry.endpoint, the NetworkPolicy's telemetry egress, the collector) is broken.
+{{- end }}

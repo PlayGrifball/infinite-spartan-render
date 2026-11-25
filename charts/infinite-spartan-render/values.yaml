@@ -1,0 +1,150 @@
+image:
+  repository: ghcr.io/playgrifball/infinite-spartan-render
+  # A digest wins over the tag. Empty tag: the chart's appVersion.
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# The cache and the game data are ReadWriteOnce volumes: one replica, Recreate rollouts. Not configurable on purpose.
+
+# The game data: a PersistentVolumeClaim in this namespace holding the Ekur dump (customization_globals.json, models/,
+# bitmaps/, materials/, ...), mounted read-only at /data. Required.
+data:
+  claimName: ""
+
+# Finished renders, kept Render.CacheDays and served again for the same loadout.
+cache:
+  existingClaim: ""
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+  size: 5Gi
+  annotations: {}
+
+# The service's own settings (Render__* in the app).
+render:
+  maxConcurrentJobs: 1
+  maxQueued: 20
+  # Submissions per client address per minute (429 above it).
+  submitsPerMinute: 60
+  cacheDays: 30
+  timeoutSeconds: 900
+  # Blender's scratch space (HOME for each run), an emptyDir at /tmp.
+  workSize: 2Gi
+
+# Trusted proxy addresses for X-Forwarded-*/X-Real-IP, so the rate limit counts real clients. Default: the cluster pod
+# network (Traefik sets X-Real-IP).
+forwardedHeaders:
+  knownIPNetworks: ["10.42.0.0/16"]
+  knownProxies: []
+  forwardedForHeaderName: X-Real-IP
+  forwardLimit: ""
+
+# Any other setting, as nested keys: config.Render.Cores etc. become Render__Cores env vars.
+config: {}
+
+extraEnv: []
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# A render holds a full Spartan in memory: all meshes OOM at 6Gi, a single one needs a few.
+resources:
+  requests:
+    cpu: "1"
+    memory: 4Gi
+  limits:
+    cpu: "4"
+    memory: 10Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1654
+  runAsGroup: 1654
+  fsGroup: 1654
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# /health/live runs no checks. /health/ready checks that Blender, the mounted data and a writable cache are there.
+startupProbe:
+  periodSeconds: 2
+  failureThreshold: 60
+  timeoutSeconds: 2
+livenessProbe:
+  periodSeconds: 20
+  failureThreshold: 3
+  timeoutSeconds: 3
+readinessProbe:
+  periodSeconds: 10
+  failureThreshold: 3
+  timeoutSeconds: 3
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# OpenTelemetry: metrics and traces pushed over OTLP to a collector (there is no /metrics to scrape). prometheusRule needs it.
+telemetry:
+  enabled: false
+  # Ex: http://otel-collector.monitoring:4317
+  endpoint: ""
+  # grpc or http/protobuf.
+  protocol: grpc
+  # OTEL_SERVICE_NAME. Empty: the release name.
+  serviceName: ""
+  # deployment.environment.name. Empty: not set.
+  environment: ""
+  resourceAttributes: {}
+  # OTEL_METRIC_EXPORT_INTERVAL, in milliseconds. Empty: the SDK's 60000.
+  metricExportInterval: ""
+
+networkPolicy:
+  enabled: true
+  # Namespaces whose pods may call the API (kubernetes.io/metadata.name In ...).
+  consumerNamespaces: []
+  consumerPodSelector: {}
+  # The ingress controller, for the public route (ingressRoute). Empty: no ingress-controller rule.
+  ingressController:
+    namespaceSelector: {}
+    podSelector: {}
+  # DNS. Empty `to`: any destination on port 53.
+  dns:
+    to: []
+  # The OTLP collector, on the endpoint's port. Empty: anywhere on that port.
+  telemetryTo: []
+  extraIngress: []
+  extraEgress: []
+
+# Traefik IngressRoute (Traefik v3). The health endpoints are never routed.
+ingressRoute:
+  enabled: false
+  host: ""
+  entryPoints: [websecure]
+  middlewares: []
+  tls:
+    secretName: ""
+    certResolver: ""
+
+# Alerts on the OTLP-pushed metrics (needs telemetry.enabled and a collector that promotes resource attributes to labels).
+prometheusRule:
+  enabled: false
+  labels: {}
+  # PromQL label matchers selecting the series. Empty: k8s_namespace_name="<release namespace>", job=~"(.+/)?<service name>".
+  selector: ""
+  absentFor: 10m
+  # SpartanRendersFailing: this many failed renders within the window.
+  failedRenders: 3
+  failedWindow: 1h
+  # SpartanRenderQueueBackedUp: queued renders for 15 minutes.
+  queueDepth: 10

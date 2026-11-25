@@ -1,0 +1,12 @@
+apiVersion: v2
+name: infinite-spartan-render
+description: >-
+  Infinite Spartan Render: a job API that renders a Halo Infinite Spartan loadout to a PNG, or exports a GLB, with
+  headless Blender and Ekur from game data mounted read-only.
+type: application
+version: 0.1.0
+kubeVersion: ">=1.30.0-0"
+appVersion: "latest"
+home: https://github.com/PlayGrifball/infinite-spartan-render
+sources:
+  - https://github.com/PlayGrifball/infinite-spartan-render

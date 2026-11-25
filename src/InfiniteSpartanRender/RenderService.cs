@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Threading.Channels;
 using Microsoft.Extensions.Options;
 
@@ -17,6 +18,8 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         new BoundedChannelOptions(Math.Max(1, options.Value.MaxQueued)) { FullMode = BoundedChannelFullMode.Wait });
     private readonly ConcurrentDictionary<string, JobStatus> _jobs = new();
 
+    public int QueueDepth => _queue.Reader.Count;
+
     private string PathFor(string id, string output) => Path.Combine(options.Value.CacheDirectory, $"{id}.{output}");
 
     public string CachedPath(string id, string output) => PathFor(id, output);
@@ -34,13 +37,18 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
     public JobStatus? Submit(Loadout loadout)
     {
         var id = loadout.Id();
-        if (File.Exists(PathFor(id, loadout.Output))) return new JobStatus(id, JobState.Done, null, DateTimeOffset.UtcNow);
+        if (File.Exists(PathFor(id, loadout.Output)))
+        {
+            RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", "cached"));
+            return new JobStatus(id, JobState.Done, null, DateTimeOffset.UtcNow);
+        }
 
         var queued = new JobStatus(id, JobState.Queued, null, DateTimeOffset.UtcNow);
         var current = _jobs.AddOrUpdate(id, queued, (_, existing) => existing.State is JobState.Queued or JobState.Running ? existing : queued);
         if (!ReferenceEquals(current, queued)) return current;
         if (_queue.Writer.TryWrite((id, loadout))) return current;
         _jobs.TryRemove(id, out _);
+        RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", "rejected"));
         return null;
     }
 
@@ -57,6 +65,7 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        RenderTelemetry.Meter.CreateObservableGauge("spartan_render.queue_depth", () => QueueDepth, description: "Renders waiting for a slot");
         Directory.CreateDirectory(options.Value.CacheDirectory);
         var slots = new SemaphoreSlim(Math.Max(1, options.Value.MaxConcurrentJobs));
         var running = new List<Task>();
@@ -97,20 +106,36 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         var final = PathFor(id, loadout.Output);
         // Ends in the real extension: Blender and its exporters append one when it is missing.
         var partial = PathFor(id + ".partial", loadout.Output);
+        using var activity = RenderTelemetry.Source.StartActivity("render");
+        activity?.SetTag("render.id", id);
+        activity?.SetTag("render.core", loadout.Core);
+        activity?.SetTag("render.output", loadout.Output);
+        activity?.SetTag("render.size", loadout.Size);
+        var started = Stopwatch.GetTimestamp();
+        void Record(string outcome)
+        {
+            RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", outcome));
+            RenderTelemetry.Duration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, new KeyValuePair<string, object?>("outcome", outcome));
+            activity?.SetTag("render.outcome", outcome);
+        }
         try
         {
             await runner.RunAsync(loadout, partial, cancellationToken);
             File.Move(partial, final, overwrite: true);
+            Record("done");
             _jobs[id] = new JobStatus(id, JobState.Done, null, DateTimeOffset.UtcNow);
         }
         catch (OperationCanceledException)
         {
             File.Delete(partial);
             _jobs.TryRemove(id, out _);
+            Record("cancelled");
         }
         catch (Exception e)
         {
             logger.LogError(e, "Render {Id} failed", id);
+            activity?.SetStatus(ActivityStatusCode.Error);
+            Record("failed");
             File.Delete(partial);
             _jobs[id] = new JobStatus(id, JobState.Failed, FailureMessage, DateTimeOffset.UtcNow);
         }

@@ -1,0 +1,157 @@
+{{- $fullname := include "infinite-spartan-render.fullname" . }}
+{{- if not .Values.data.claimName }}
+{{- fail "data.claimName is required: the PersistentVolumeClaim (in this namespace) holding the Ekur game data" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "infinite-spartan-render.labels" . | nindent 4 }}
+spec:
+  # The cache and the data volumes are ReadWriteOnce: one pod, and the old one stops before the new one starts.
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "infinite-spartan-render.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "infinite-spartan-render.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: render
+          image: {{ include "infinite-spartan-render.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: Render__CacheDirectory
+              value: /cache
+            - name: Render__DataDirectory
+              value: /data
+            - name: Render__WorkDirectory
+              value: /tmp/render
+            - name: Render__MaxConcurrentJobs
+              value: {{ .Values.render.maxConcurrentJobs | int64 | quote }}
+            - name: Render__MaxQueued
+              value: {{ .Values.render.maxQueued | int64 | quote }}
+            - name: Render__SubmitsPerMinute
+              value: {{ .Values.render.submitsPerMinute | int64 | quote }}
+            - name: Render__CacheDays
+              value: {{ .Values.render.cacheDays | int64 | quote }}
+            - name: Render__TimeoutSeconds
+              value: {{ .Values.render.timeoutSeconds | int64 | quote }}
+            {{- with .Values.forwardedHeaders }}
+            {{- range $i, $n := .knownIPNetworks }}
+            - name: ForwardedHeaders__KnownIPNetworks__{{ $i }}
+              value: {{ $n | quote }}
+            {{- end }}
+            {{- range $i, $p := .knownProxies }}
+            - name: ForwardedHeaders__KnownProxies__{{ $i }}
+              value: {{ $p | quote }}
+            {{- end }}
+            {{- if .forwardedForHeaderName }}
+            - name: ForwardedHeaders__ForwardedForHeaderName
+              value: {{ .forwardedForHeaderName | quote }}
+            {{- end }}
+            {{- if .forwardLimit }}
+            - name: ForwardedHeaders__ForwardLimit
+              value: {{ .forwardLimit | quote }}
+            {{- end }}
+            {{- end }}
+            {{- with .Values.telemetry }}
+            {{- if .enabled }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .serviceName | default $.Release.Name | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ required "telemetry.endpoint is required when telemetry is enabled" .endpoint | quote }}
+            - name: OTEL_EXPORTER_OTLP_PROTOCOL
+              value: {{ .protocol | quote }}
+            {{- $attrs := list (printf "k8s.namespace.name=%s" $.Release.Namespace) }}
+            {{- if .environment }}{{ $attrs = append $attrs (printf "deployment.environment.name=%s" .environment) }}{{ end }}
+            {{- range $k, $v := .resourceAttributes }}{{ $attrs = append $attrs (printf "%s=%v" $k $v) }}{{ end }}
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: {{ join "," $attrs | quote }}
+            {{- if .metricExportInterval }}
+            - name: OTEL_METRIC_EXPORT_INTERVAL
+              value: {{ .metricExportInterval | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+            {{- with (include "infinite-spartan-render.flatten" (dict "prefix" "" "value" .Values.config) | trim) }}
+            {{- . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+            - name: cache
+              mountPath: /cache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.data.claimName }}
+            readOnly: true
+        - name: cache
+          persistentVolumeClaim:
+            claimName: {{ include "infinite-spartan-render.cacheClaimName" . }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.render.workSize }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

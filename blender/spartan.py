@@ -1,5 +1,6 @@
 # Run by Blender: blender -b --python spartan.py -- loadout.json output-path
 import importlib
+import os
 import json
 import re
 import shutil
@@ -10,7 +11,7 @@ import addon_utils
 import bpy
 import mathutils
 
-DATA = "/data"
+DATA = os.environ.get("ISR_DATA", "/data")
 EKUR_ASSETS = "/opt/ekur/assets"
 MOD = "bl_ext.user_default.ekur"
 HASHED = re.compile(r"-?\d+_-?\d+_-?\d+(\.\d+)?")

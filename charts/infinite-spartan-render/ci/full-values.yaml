@@ -1,0 +1,30 @@
+image:
+  tag: sha-0000000
+data:
+  claimName: ekur-data-needed
+cache:
+  storageClass: longhorn
+  size: 8Gi
+config:
+  Render:
+    MaxQueued: 5
+telemetry:
+  enabled: true
+  endpoint: http://otel-collector.monitoring:4317
+  environment: test
+networkPolicy:
+  consumerNamespaces: [grif-test]
+  ingressController:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: traefik
+ingressRoute:
+  enabled: true
+  host: spartan.example.com
+  middlewares:
+    - name: rate-limit
+      namespace: traefik
+  tls:
+    certResolver: letsencrypt
+prometheusRule:
+  enabled: true

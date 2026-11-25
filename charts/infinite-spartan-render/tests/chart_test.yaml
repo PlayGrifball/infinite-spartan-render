@@ -1,0 +1,114 @@
+suite: infinite-spartan-render
+release:
+  name: infinite-spartan-render
+  namespace: spartan
+values:
+  - ../ci/full-values.yaml
+tests:
+  - it: runs one replica with Recreate, non-root, read-only root filesystem and CPU limits
+    template: templates/deployment.yaml
+    asserts:
+      - equal: { path: spec.replicas, value: 1 }
+      - equal: { path: spec.strategy.type, value: Recreate }
+      - equal: { path: spec.template.spec.securityContext.runAsNonRoot, value: true }
+      - equal: { path: "spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem", value: true }
+      - isNotEmpty: { path: "spec.template.spec.containers[0].resources.limits.cpu" }
+      - equal: { path: "spec.template.spec.containers[0].image", value: "ghcr.io/playgrifball/infinite-spartan-render:sha-0000000" }
+
+  - it: probes liveness without checks and readiness with the ready endpoint
+    template: templates/deployment.yaml
+    asserts:
+      - equal: { path: "spec.template.spec.containers[0].livenessProbe.httpGet.path", value: /health/live }
+      - equal: { path: "spec.template.spec.containers[0].startupProbe.httpGet.path", value: /health/live }
+      - equal: { path: "spec.template.spec.containers[0].readinessProbe.httpGet.path", value: /health/ready }
+
+  - it: mounts the game data read-only and the cache writable
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: "spec.template.spec.containers[0].volumeMounts"
+          content: { name: data, mountPath: /data, readOnly: true }
+      - contains:
+          path: "spec.template.spec.volumes"
+          content:
+            name: data
+            persistentVolumeClaim: { claimName: ekur-data-needed, readOnly: true }
+      - contains:
+          path: "spec.template.spec.volumes"
+          content:
+            name: cache
+            persistentVolumeClaim: { claimName: infinite-spartan-render-cache }
+
+  - it: needs the data claim
+    template: templates/deployment.yaml
+    set:
+      data.claimName: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: data.claimName is required
+
+  - it: sets OpenTelemetry from the telemetry values and extra config as env
+    template: templates/deployment.yaml
+    asserts:
+      - contains:
+          path: "spec.template.spec.containers[0].env"
+          content: { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector.monitoring:4317" }
+      - contains:
+          path: "spec.template.spec.containers[0].env"
+          content: { name: OTEL_SERVICE_NAME, value: infinite-spartan-render }
+      - contains:
+          path: "spec.template.spec.containers[0].env"
+          content: { name: Render__MaxQueued, value: "5" }
+
+  - it: leaves OpenTelemetry out when telemetry is off
+    template: templates/deployment.yaml
+    set:
+      telemetry.enabled: false
+      prometheusRule.enabled: false
+    asserts:
+      - notContains:
+          path: "spec.template.spec.containers[0].env"
+          content: { name: OTEL_SERVICE_NAME, value: infinite-spartan-render }
+          any: true
+
+  - it: makes a cache claim unless one is given
+    template: templates/pvc.yaml
+    asserts:
+      - equal: { path: metadata.name, value: infinite-spartan-render-cache }
+      - equal: { path: spec.resources.requests.storage, value: 8Gi }
+
+  - it: makes no cache claim when one exists
+    template: templates/pvc.yaml
+    set:
+      cache.existingClaim: mine
+    asserts:
+      - hasDocuments: { count: 0 }
+
+  - it: restricts egress to DNS and the collector, and applies first
+    template: templates/networkpolicy.yaml
+    asserts:
+      - equal: { path: 'metadata.annotations["argocd.argoproj.io/sync-wave"]', value: "-1" }
+      - lengthEqual: { path: spec.egress, count: 2 }
+      - equal: { path: "spec.egress[1].ports[0].port", value: 4317 }
+
+  - it: routes the host except the health endpoints
+    template: templates/ingressroute.yaml
+    asserts:
+      - equal: { path: kind, value: IngressRoute }
+      - equal: { path: "spec.routes[0].match", value: "Host(`spartan.example.com`) && !PathRegexp(`(?i)^/+health(/|$)`)" }
+
+  - it: alerts on failed renders, a full queue and missing metrics
+    template: templates/prometheusrule.yaml
+    asserts:
+      - equal: { path: "spec.groups[0].rules[0].alert", value: SpartanRendersFailing }
+      - equal: { path: "spec.groups[0].rules[1].alert", value: SpartanRenderQueueBackedUp }
+      - equal: { path: "spec.groups[0].rules[2].alert", value: SpartanRenderMetricsAbsent }
+      - matchRegex: { path: "spec.groups[0].rules[0].expr", pattern: 'k8s_namespace_name="spartan"' }
+
+  - it: refuses alerts without telemetry
+    template: templates/prometheusrule.yaml
+    set:
+      telemetry.enabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: prometheusRule needs telemetry.enabled
