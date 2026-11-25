@@ -42,7 +42,8 @@ ref=refs/tags/$tag
 path=charts/infinite-spartan-render/deployed-image.yaml
 content=$(values "$image" "$digest" "$version")$'\n'
 
-current=$(gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha 2>/dev/null || true)
+# a missing ref makes gh print the 404 body on stdout, so only a successful answer counts
+if current=$(gh api "repos/$repo/git/ref/tags/$tag" --jq .object.sha 2>/dev/null); then :; else current=; fi
 deploy=
 if [[ -n "$current" ]]; then
   deployed=$(gh api "repos/$repo/contents/$path?ref=$current" --jq .content 2>/dev/null | base64 -d || true)

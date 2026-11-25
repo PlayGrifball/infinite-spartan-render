@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const script = new URL('isr-deploy.sh', import.meta.url);
@@ -33,4 +36,28 @@ test('the release workflow deploys only after publishing, releasing', () => {
   assert.match(workflow, /\r?\n  deploy:\r?\n    needs: \[publish, release\]/);
   assert.match(workflow, /\.github\/scripts\/isr-deploy\.sh/);
   assert.match(workflow, /permissions:\r?\n      contents: write/);
+});
+
+const hasJq = spawnSync('jq', ['--version']).status === 0;
+
+test('creates deploy/current when the tag does not exist yet', { skip: !hasJq && 'jq is not installed' }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'isr-deploy-'));
+  const log = join(dir, 'calls.log');
+  // gh prints the 404 body on stdout and exits 1 for a missing ref, like the real one
+  writeFileSync(join(dir, 'gh'), `#!/usr/bin/env bash
+echo "$*" >> "${log}"
+case "$*" in
+  *git/ref/tags/deploy/current*) echo '{"message":"Not Found","status":"404"}'; exit 1 ;;
+  *git/commits/*) echo treesha ;;
+  *git/trees*) echo newtree ;;
+  *git/commits*) echo newcommit ;;
+  *git/refs*) echo newcommit ;;
+esac
+`, { mode: 0o755 });
+  const out = execFileSync('bash', [fileURLToPath(script), 'c'.repeat(40), 'ghcr.io/playgrifball/infinite-spartan-render:sha-1234567', digest, '0.1.5'], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GITHUB_REPOSITORY: 'o/r', GITHUB_OUTPUT: join(dir, 'out') },
+  });
+  assert.match(out, /Deployed infinite-spartan-render 0\.1\.5: deploy\/current -> newcommit/);
+  assert.match(readFileSync(log, 'utf8'), /git\/refs -X POST -f ref=refs\/tags\/deploy\/current/);
 });
