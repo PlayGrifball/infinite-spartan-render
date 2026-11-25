@@ -28,15 +28,19 @@ GET /spartans/{id}/file   -> the PNG or GLB (404 until done)
 The id is a hash of the loadout, so asking again returns the cached file. A region left out of `armor` gets the core's
 default piece; `coating` left out gets the default coating.
 
-| size  | png                           | glb                  |
-|-------|-------------------------------|----------------------|
-| small | 700x1000, 48 samples          | textures at most 1024 |
-| full  | 2100x3000, 128 samples        | original textures    |
+| size  | png                    | glb                       |
+|-------|------------------------|---------------------------|
+| small | 700x1000, 48 samples   | textures at most 1024 px  |
+| full  | 2100x3000, 128 samples | original textures         |
 
 ## Settings (`Render:` section / `Render__X` environment)
 
 `BlenderPath`, `ScriptPath`, `CacheDirectory` (`/cache`), `WorkDirectory` (`/tmp/render`), `MaxConcurrentJobs` (1; a
-render needs several GB of RAM), `TimeoutMinutes` (15).
+render needs several GB of RAM), `MaxQueued` (20; more gets 503), `SubmitsPerMinute` (60 per address; more gets 429),
+`CacheDays` (30; older results are deleted), `TimeoutSeconds` (900), `Cores`.
+
+Jobs are held in memory: after a restart an unfinished job answers 404 and the client posts the loadout again (finished
+results are still in the cache). A render that cannot load all its materials fails rather than being cached degraded.
 
 ## Not done yet
 

@@ -15,9 +15,14 @@ public class ApiTests
         public int Calls;
         public bool Fail;
 
+        public Task? Gate;
+        public string? LastPath;
+
         public async Task RunAsync(Loadout loadout, string outputPath, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref Calls);
+            LastPath = outputPath;
+            if (Gate is not null) await Gate.WaitAsync(cancellationToken);
             await Task.Delay(20, cancellationToken);
             if (Fail) throw new InvalidOperationException("blender broke");
             await File.WriteAllTextAsync(outputPath, loadout.Output + loadout.Size, cancellationToken);
@@ -25,18 +30,24 @@ public class ApiTests
     }
 
     private string _cache = "";
+    private readonly Dictionary<string, string> _settings = new();
     private FakeRunner _runner = new();
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _client = null!;
 
     [SetUp]
-    public void SetUp()
+    public void SetUp() => Start();
+
+    private void Start()
     {
+        _client?.Dispose();
+        _factory?.Dispose();
         _cache = Path.Combine(Path.GetTempPath(), "isr-" + Guid.NewGuid().ToString("N"));
         _runner = new FakeRunner();
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("Render:CacheDirectory", _cache);
+            foreach (var (k, v) in _settings) b.UseSetting(k, v);
             b.ConfigureServices(s => s.Replace(ServiceDescriptor.Singleton<IBlenderRunner>(_runner)));
         });
         _client = _factory.CreateClient();
@@ -50,8 +61,8 @@ public class ApiTests
         if (Directory.Exists(_cache)) Directory.Delete(_cache, true);
     }
 
-    private static object Body(string output = "png", string size = "small", string core = "Mark VII") =>
-        new { core, armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating = "1120495519", output, size };
+    private static object Body(string output = "png", string size = "small", string core = "Mark VII", string coating = "1120495519") =>
+        new { core, armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating, output, size };
 
     private async Task<string> StateOf(string id, string wanted)
     {
@@ -121,7 +132,7 @@ public class ApiTests
         var id = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
         Assert.That(await StateOf(id, "failed"), Is.EqualTo("failed"));
         var status = await _client.GetFromJsonAsync<JsonElement>($"/spartans/{id}");
-        Assert.That(status.GetProperty("error").GetString(), Does.Contain("blender broke"));
+        Assert.That(status.GetProperty("error").GetString(), Is.EqualTo(RenderService.FailureMessage));
         Assert.That((await _client.GetAsync($"/spartans/{id}/file")).StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
 
         _runner.Fail = false;
@@ -159,6 +170,87 @@ public class ApiTests
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
     }
+    [Test]
+    public async Task TheRunnerIsGivenAPathWithTheRealExtension()
+    {
+        var png = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+        await StateOf(png, "done");
+        Assert.That(_runner.LastPath, Does.EndWith(".png"));
+
+        var glb = (await (await _client.PostAsJsonAsync("/spartans", Body("glb"))).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+        await StateOf(glb, "done");
+        Assert.That(_runner.LastPath, Does.EndWith(".glb"));
+    }
+
+    [TestCase("""{"core":"Mark VII","armor":null}""")]
+    [TestCase("""{"core":"Mark VII","armor":{"helmet":null}}""")]
+    [TestCase("""{"core":"Not A Core"}""")]
+    public async Task NullOrUnknownMembers_Get400_NotAServerError(string json)
+    {
+        var response = await _client.PostAsync("/spartans", new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+        Assert.That(_runner.Calls, Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task AFullQueue_Gets503WithRetryAfter()
+    {
+        var gate = new TaskCompletionSource();
+        _runner.Gate = gate.Task;
+        _settings["Render:MaxQueued"] = "1";
+        _settings["Render:MaxConcurrentJobs"] = "1";
+        Start();
+        _runner.Gate = gate.Task;
+
+        var running = (await (await _client.PostAsJsonAsync("/spartans", Body(core: "Yoroi"))).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+        await StateOf(running, "running");
+        var queued = await _client.PostAsJsonAsync("/spartans", Body(core: "Chimera"));
+        var rejected = await _client.PostAsJsonAsync("/spartans", Body(core: "HAZMAT"));
+
+        Assert.That(queued.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        Assert.That(rejected.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
+        Assert.That(rejected.Headers.RetryAfter, Is.Not.Null);
+        gate.SetResult();
+    }
+
+    [Test]
+    public async Task TooManySubmitsFromOneAddress_Get429()
+    {
+        _settings["Render:SubmitsPerMinute"] = "2";
+        Start();
+
+        var codes = new List<HttpStatusCode>();
+        for (var i = 0; i < 3; i++)
+            codes.Add((await _client.PostAsJsonAsync("/spartans", Body(coating: i.ToString()))).StatusCode);
+
+        Assert.That(codes[2], Is.EqualTo(HttpStatusCode.TooManyRequests));
+    }
+
+    [Test]
+    public async Task TheSweep_DropsOldCacheFiles_AndKeepsNewOnes()
+    {
+        Directory.CreateDirectory(_cache);
+        var old = Path.Combine(_cache, new string('0', 32) + ".png");
+        var fresh = Path.Combine(_cache, new string('1', 32) + ".png");
+        await File.WriteAllTextAsync(old, "x");
+        await File.WriteAllTextAsync(fresh, "x");
+        File.SetLastWriteTimeUtc(old, DateTime.UtcNow.AddDays(-40));
+
+        _factory.Services.GetRequiredService<RenderService>().Sweep(DateTimeOffset.UtcNow);
+
+        Assert.That(File.Exists(old), Is.False);
+        Assert.That(File.Exists(fresh), Is.True);
+    }
+
+    [Test]
+    public async Task AnUnknownJob_TellsTheClientToPostAgain()
+    {
+        var response = await _client.GetAsync("/spartans/" + new string('a', 32));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        Assert.That(await response.Content.ReadAsStringAsync(), Does.Contain("POST the loadout again"));
+    }
 }
 
 public class LoadoutTests
@@ -176,5 +268,78 @@ public class LoadoutTests
     public void ADifferentCoating_ChangesTheId()
     {
         Assert.That(new Loadout { Core = "x", Coating = "1" }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Coating = "2" }.Id()));
+    }
+}
+
+public class BlenderRunnerTests
+{
+    private string _dir = "";
+
+    [SetUp]
+    public void SetUp() => _dir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "isr-run-" + Guid.NewGuid().ToString("N"))).FullName;
+
+    [TearDown]
+    public void TearDown() => Directory.Delete(_dir, true);
+
+    private BlenderRunner RunnerFor(string script, int timeoutSeconds = 30)
+    {
+        var path = Path.Combine(_dir, "blender");
+        File.WriteAllText(path, "#!/bin/sh\n" + script + "\n");
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return new BlenderRunner(Microsoft.Extensions.Options.Options.Create(new RenderOptions
+        {
+            BlenderPath = path,
+            WorkDirectory = Path.Combine(_dir, "work"),
+            TimeoutSeconds = timeoutSeconds,
+        }));
+    }
+
+    private static Loadout Mark7 => new() { Core = "Mark VII" };
+
+    [Test]
+    public async Task ABlenderThatWritesTheOutput_Succeeds_AndLeavesNoWorkDirectory()
+    {
+        var output = Path.Combine(_dir, "out.png");
+        var runner = RunnerFor("for last; do :; done; echo done > \"$last\"");
+
+        await runner.RunAsync(Mark7, output, CancellationToken.None);
+
+        Assert.That(File.Exists(output), Is.True);
+        Assert.That(Directory.GetDirectories(Path.Combine(_dir, "work")), Is.Empty);
+    }
+
+    [Test]
+    public void ABlenderThatExitsNonZero_ThrowsWithItsOutput()
+    {
+        var runner = RunnerFor("echo something broke; exit 3");
+
+        var e = Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunAsync(Mark7, Path.Combine(_dir, "out.png"), CancellationToken.None));
+
+        Assert.That(e!.Message, Does.Contain("exited with 3").And.Contain("something broke"));
+    }
+
+    [Test]
+    public void ABlenderThatExitsZeroWithoutTheFile_Throws()
+    {
+        var runner = RunnerFor("exit 0");
+
+        Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunAsync(Mark7, Path.Combine(_dir, "out.png"), CancellationToken.None));
+    }
+
+    [Test]
+    public void ABlenderThatRunsTooLong_IsKilled_AsATimeout()
+    {
+        var runner = RunnerFor("exec sleep 30", timeoutSeconds: 1);
+
+        Assert.ThrowsAsync<TimeoutException>(() => runner.RunAsync(Mark7, Path.Combine(_dir, "out.png"), CancellationToken.None));
+    }
+
+    [Test]
+    public void AShutdown_IsACancellation_NotATimeout()
+    {
+        var runner = RunnerFor("exec sleep 30");
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+
+        Assert.CatchAsync<OperationCanceledException>(() => runner.RunAsync(Mark7, Path.Combine(_dir, "out.png"), cts.Token));
     }
 }

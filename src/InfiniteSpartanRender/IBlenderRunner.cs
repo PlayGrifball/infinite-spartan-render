@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 
@@ -18,7 +17,11 @@ public sealed class RenderOptions
     public string CacheDirectory { get; set; } = "/cache";
     public string WorkDirectory { get; set; } = "/tmp/render";
     public int MaxConcurrentJobs { get; set; } = 1;
-    public int TimeoutMinutes { get; set; } = 15;
+    public int MaxQueued { get; set; } = 20;
+    public int SubmitsPerMinute { get; set; } = 60;
+    public int CacheDays { get; set; } = 30;
+    public int TimeoutSeconds { get; set; } = 900;
+    public string[] Cores { get; set; } = ["Mark VII", "Mark V [B]", "Yoroi", "Eaglestrike", "Rakshasa", "Chimera", "Mirage IIC", "HAZMAT", "Mark IV"];
 }
 
 public sealed class BlenderRunner(IOptions<RenderOptions> options) : IBlenderRunner
@@ -55,7 +58,7 @@ public sealed class BlenderRunner(IOptions<RenderOptions> options) : IBlenderRun
             process.BeginErrorReadLine();
 
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromMinutes(o.TimeoutMinutes));
+            timeout.CancelAfter(TimeSpan.FromSeconds(o.TimeoutSeconds));
             try
             {
                 await process.WaitForExitAsync(timeout.Token);
@@ -63,8 +66,11 @@ public sealed class BlenderRunner(IOptions<RenderOptions> options) : IBlenderRun
             catch (OperationCanceledException)
             {
                 process.Kill(entireProcessTree: true);
-                throw new TimeoutException($"Blender did not finish in {o.TimeoutMinutes} minutes");
+                if (cancellationToken.IsCancellationRequested) throw;
+                throw new TimeoutException($"Blender did not finish in {o.TimeoutSeconds} seconds");
             }
+            // The redirected streams are read asynchronously: wait for the last lines before reporting them.
+            process.WaitForExit();
 
             if (process.ExitCode != 0 || !File.Exists(outputPath))
             {
@@ -75,7 +81,9 @@ public sealed class BlenderRunner(IOptions<RenderOptions> options) : IBlenderRun
         }
         finally
         {
-            Directory.Delete(work, recursive: true);
+            try { Directory.Delete(work, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
         }
     }
 }

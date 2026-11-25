@@ -20,7 +20,6 @@ loadout = json.loads(Path(loadout_path).read_text())
 core = loadout["Core"]
 armor = loadout.get("Armor") or {}
 coating = loadout.get("Coating") or ""
-visor = loadout.get("Visor")
 output = loadout.get("Output", "png")
 full = loadout.get("Size") == "full"
 
@@ -86,6 +85,7 @@ ju = importlib.import_module(MOD + ".src.utils")
 jd = importlib.import_module(MOD + ".src.json_definitions")
 done = set()
 missing = set()
+problems = []
 for slot in mo.get_materials():
     if not slot.material or not slot.material.node_tree:
         continue
@@ -95,23 +95,29 @@ for slot in mo.get_materials():
     p = Path(f"{DATA}/materials/{n}.json")
     if not p.exists():
         missing.add(n)
+        if re.fullmatch(r"-?\d+", n):
+            problems.append(f"material {n}: no JSON in the data folder")
         continue
     mo.remove_nodes(slot.material.node_tree)
     m = ju.read_json_file(p, jd.CommonMaterial)
+    done.add(n)
     if m is None:
+        problems.append(f"material {n}: unreadable JSON")
         continue
     try:
         mo.run_material(m, slot.material.node_tree)
     except Exception as e:
-        print("MATFAIL", n, repr(e)[:120])
-    done.add(n)
+        problems.append(f"material {n}: {e!r}"[:200])
 print("MATS", len(done), "missing", sorted(missing))
+if problems:
+    sys.exit("Materials failed, not rendering a degraded Spartan: " + "; ".join(problems))
 
 if output == "glb":
     if not full:
         for img in bpy.data.images:
             if img.size[0] > 1024 or img.size[1] > 1024:
-                img.scale(min(img.size[0], 1024), min(img.size[1], 1024))
+                factor = 1024 / max(img.size[0], img.size[1])
+                img.scale(max(1, round(img.size[0] * factor)), max(1, round(img.size[1] * factor)))
     bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", use_selection=True, export_apply=True)
     sys.exit(0)
 
@@ -144,5 +150,6 @@ scale = 3 if full else 1
 sc.render.resolution_x = 700 * scale
 sc.render.resolution_y = 1000 * scale
 sc.render.image_settings.file_format = "PNG"
+sc.render.use_file_extension = False
 sc.render.filepath = out
 bpy.ops.render.render(write_still=True)
