@@ -48,10 +48,11 @@ function repo() {
   return { dir, git, commit };
 }
 
-const notes = (r, version) => releaseNotes({
+const notes = (r, version, packages = { nuget: true }) => releaseNotes({
   cwd: r.dir, chart: 'charts/infinite-spartan-render', name: 'infinite-spartan-render', version, repository,
   chartRepo: 'oci://ghcr.io/playgrifball/charts', digest, identity,
   image: { ref: 'ghcr.io/playgrifball/infinite-spartan-render:sha-1234567', digest: imageDigest, commit: '1234567'.padEnd(40, '0'), identity: imageIdentity },
+  packages,
 });
 
 /** A chart released as 0.3.1, then a merged pull request, a squashed one and commits elsewhere. */
@@ -142,6 +143,18 @@ test('names the service image the chart runs: its tag, digest, commit and how to
   assert.ok(md.includes(`[1234567](https://github.com/${repository}/commit/${commit})`), md);
   assert.ok(md.includes(`cosign verify ghcr.io/playgrifball/infinite-spartan-render@${imageDigest} --certificate-identity-regexp '${imageIdentity}' --certificate-oidc-issuer https://token.actions.githubusercontent.com`), md);
   assert.ok(md.indexOf('## Image') < md.indexOf('## Chart'), 'the image before the chart');
+});
+
+test('lists the client package only when this release published it', () => {
+  const { r } = history();
+  const published = notes(r, '0.3.2');
+  assert.ok(published.includes('## Client package'), published);
+  assert.ok(published.includes('https://www.nuget.org/packages/PlayGrifball.InfiniteSpartanRender.Client/0.3.2'), published);
+  assert.ok(published.indexOf('## Client package') < published.indexOf('## Image'), published);
+
+  const unchanged = notes(r, '0.3.2', { nuget: false });
+  assert.ok(unchanged.includes('No client package changes in this release.'), unchanged);
+  assert.ok(!unchanged.includes('nuget.org/packages'), unchanged);
 });
 
 /** What plan decides for a run whose push went from before to HEAD. */
