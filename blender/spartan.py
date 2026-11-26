@@ -175,7 +175,6 @@ def prop_id(obj, name):
 
 keep = []
 matched_parts = set()
-part_regions = set()
 # Pieces by id: a kit's meshes can sit in a [KIT] collection as well as in a [REGION] one.
 for col in bpy.data.collections:
     if not col.name.startswith(("[REGION]", "[KIT]")):
@@ -185,14 +184,12 @@ for col in bpy.data.collections:
         if x.type == "MESH" and r in parts and prop_id(x, "permutation_name") == parts[r]:
             keep.append(x)
             matched_parts.add(r)
-            part_regions.add(r)
 for col in bpy.data.collections:
     if not col.name.startswith("[REGION]"):
         continue
-    objs = sorted((x for x in col.objects if x.type == "MESH"), key=lambda x: x.name)
+    # A part replaces the default piece of its own region only: other regions sharing the collection keep theirs.
+    objs = sorted((x for x in col.objects if x.type == "MESH" and prop_id(x, "region_name") not in matched_parts), key=lambda x: x.name)
     if not objs:
-        continue
-    if any(prop_id(x, "region_name") in part_regions for x in objs):
         continue
     if all(HASHED.fullmatch(x.name) for x in objs):
         first = objs[0].name.split("_")[1]

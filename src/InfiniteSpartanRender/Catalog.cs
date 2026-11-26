@@ -17,38 +17,55 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
 {
     private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
     private readonly object _lock = new();
-    private IReadOnlyList<string>? _coatings;
-    private IReadOnlyList<string>? _visors;
+    private string? _signature;
+    private Catalog? _built;
 
     // A core's catalog is written next to the cache by the warm-up, and replaced with each Blender script.
     public string PathFor(string core, string renderer)
         => Path.Combine(options.Value.CacheDirectory, "catalog", $"{renderer}-{string.Concat(core.Select(c => char.IsLetterOrDigit(c) ? c : '-'))}.json");
 
+    // Built again only when a file it reads (a core's catalog, a stylelist, the visor list) was added, removed or changed.
     public Catalog Get(string renderer)
     {
         var o = options.Value;
+        var signature = Signature(o, renderer);
+        lock (_lock)
+        {
+            if (_built is not null && signature == _signature) return _built;
+            _built = Build(o, renderer);
+            _signature = signature;
+            return _built;
+        }
+    }
+
+    private string Signature(RenderOptions o, string renderer)
+    {
+        var files = o.Cores.Select(c => PathFor(c, renderer)).ToList();
+        var folder = Path.Combine(o.DataDirectory, "stylelists");
+        if (Directory.Exists(folder)) files.AddRange(Directory.EnumerateFiles(folder, "*.json").Order(StringComparer.Ordinal));
+        files.Add(Path.Combine(o.EkurAssets, "all_visors.json"));
+        return string.Join('\n', files.Select(f => new FileInfo(f) is { Exists: true } i ? $"{f}|{i.Length}|{i.LastWriteTimeUtc.Ticks}" : f + "|missing"));
+    }
+
+    private Catalog Build(RenderOptions o, string renderer)
+    {
         var cores = new List<CatalogCore>();
         var pending = new List<string>();
         foreach (var name in o.Cores)
         {
-            var file = PathFor(name, renderer);
-            CatalogCore? core = null;
-            if (File.Exists(file))
-            {
-                try { core = JsonSerializer.Deserialize<CatalogCore>(File.ReadAllText(file), Web) is { } c ? c with { Name = name } : null; }
-                catch (JsonException) { }
-            }
+            var core = ReadCore(PathFor(name, renderer), name);
             if (core is null) pending.Add(name); else cores.Add(core);
         }
-        lock (_lock)
-        {
-            _coatings ??= Coatings(o.DataDirectory);
-            _visors ??= Visors(o.EkurAssets);
-            return new Catalog(cores, _coatings, _visors, pending);
-        }
+        return new Catalog(cores, Coatings(o.DataDirectory), Visors(o.EkurAssets), pending);
     }
 
-    // The style ids Ekur accepts as a coating: the keys of "styles" in every stylelist.
+    private static CatalogCore? ReadCore(string file, string name)
+    {
+        try { return File.Exists(file) && JsonSerializer.Deserialize<CatalogCore>(File.ReadAllText(file), Web) is { } c ? c with { Name = name } : null; }
+        catch (Exception e) when (e is JsonException or IOException) { return null; }
+    }
+
+    // The style ids Ekur accepts as a coating: the keys of "styles" in every stylelist (a file that is not readable JSON adds none).
     private static List<string> Coatings(string dataDirectory)
     {
         var ids = new SortedSet<string>(StringComparer.Ordinal);
@@ -56,9 +73,13 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
         if (!Directory.Exists(folder)) return [];
         foreach (var file in Directory.EnumerateFiles(folder, "*.json"))
         {
-            using var doc = JsonDocument.Parse(File.ReadAllBytes(file));
-            if (doc.RootElement.TryGetProperty("styles", out var styles) && styles.ValueKind == JsonValueKind.Object)
-                foreach (var style in styles.EnumerateObject()) ids.Add(style.Name);
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllBytes(file));
+                if (doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("styles", out var styles) && styles.ValueKind == JsonValueKind.Object)
+                    foreach (var style in styles.EnumerateObject()) ids.Add(style.Name);
+            }
+            catch (Exception e) when (e is JsonException or IOException) { }
         }
         return [.. ids];
     }
@@ -68,7 +89,11 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
     {
         var file = Path.Combine(assets, "all_visors.json");
         if (!File.Exists(file)) return [];
-        using var doc = JsonDocument.Parse(File.ReadAllBytes(file));
-        return doc.RootElement.ValueKind == JsonValueKind.Object ? doc.RootElement.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToList() : [];
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllBytes(file));
+            return doc.RootElement.ValueKind == JsonValueKind.Object ? doc.RootElement.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal).ToList() : [];
+        }
+        catch (Exception e) when (e is JsonException or IOException) { return []; }
     }
 }

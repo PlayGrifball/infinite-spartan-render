@@ -82,7 +82,10 @@ app.MapPost("/spartans", (Loadout loadout, RenderService service, IOptions<Rende
     .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
 
 // What a loadout may name. A core still importing is in pendingCores and joins when its import is done.
-app.MapGet("/catalog", (RenderService service) => Results.Ok(service.Catalog()));
+app.MapGet("/catalog", (RenderService service) => Results.Ok(service.Catalog()))
+    .WithName("GetCatalog")
+    .WithSummary("What a loadout may name: the cores with their pieces, the coating ids and the visor titles.")
+    .Produces<Catalog>();
 
 app.MapGet("/spartans/{id}", (string id, RenderService service) =>
     IsId(id) && service.Status(id) is { } s

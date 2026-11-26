@@ -167,17 +167,12 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         catch (OperationCanceledException) { }
     }
 
-    // The core's pieces, read from its saved import (quick once the import exists), kept for GET /catalog.
+    // The core's pieces, read from its saved import (quick once the import exists), kept for GET /catalog. Made again with every warm: an updated Ekur or Blender may have changed them.
     private async Task WriteCatalog(string core, CancellationToken cancellationToken)
     {
         var final = catalog.PathFor(core, _renderer.Value);
         var partial = final + ".partial.json";
         Directory.CreateDirectory(Path.GetDirectoryName(final)!);
-        if (File.Exists(final))
-        {
-            File.SetLastWriteTimeUtc(final, DateTime.UtcNow);
-            return;
-        }
         try
         {
             await runner.RunAsync(new Loadout { Core = core, Output = "catalog" }, partial, cancellationToken);
