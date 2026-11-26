@@ -166,10 +166,11 @@ public class IntegrationTests
 
         await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb" }, neutral, CancellationToken.None);
 
-        double baked, reused;
+        double baked, reused, materials;
         lock (_phases)
         {
             var second = _phases.Skip(mark).ToArray();
+            materials = second.Where(p => p.Phase == "materials").Sum(p => p.Seconds);
             baked = second.Where(p => p.Phase == "bake").Sum(p => p.Seconds);
             reused = second.Where(p => p.Phase == "bake_reused").Sum(p => p.Seconds);
         }
@@ -177,6 +178,7 @@ public class IntegrationTests
         Keep(neutral);
         Assert.That(baked, Is.EqualTo(0), "the second GLB bakes nothing");
         Assert.That(reused, Is.GreaterThan(0), "and loads the first one's textures");
+        Assert.That(materials, Is.LessThan(5), "so it does not build the materials either");
         Assert.That(System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(neutral), 0, 4), Is.EqualTo("glTF"));
         Assert.That(new FileInfo(neutral).Length, Is.GreaterThan(100_000));
     }

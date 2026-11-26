@@ -138,13 +138,34 @@ if coating:
     mp.use_default_coating = False
     mp.coating_id = coating
 
+BAKE_PASSES = (("color", "DIFFUSE", "sRGB"), ("rough", "ROUGHNESS", "Non-Color"), ("normal", "NORMAL", "Non-Color"), ("emit", "EMIT", "sRGB"))
+
+
+def bake_folder(size):
+    # The baked textures depend on the loadout, not the stance (a pose moves vertices, not UVs): keep them per loadout.
+    cache = os.environ.get("ISR_BAKE_CACHE")
+    if not cache:
+        return None
+    renderer = hashlib.sha256(Path(sys.argv[sys.argv.index("--python") + 1]).read_bytes()).hexdigest()
+    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, size], sort_keys=True)
+    return Path(cache) / hashlib.sha256(ident.encode()).hexdigest()[:32]
+
+
+def bake_files(obj, folder):
+    return {key: folder / f"{re.sub(r'[^A-Za-z0-9._-]+', '-', obj.name)}_{key}.png" for key, _, _ in BAKE_PASSES}
+
+
+# A GLB whose textures are all baked already never looks at the Ekur materials: skip building them.
+bake_size = 2048 if full else 1024
+textures_cached = output == "glb" and (cached_folder := bake_folder(bake_size)) is not None and all(f.exists() for x in keep for f in bake_files(x, cached_folder).values())
+
 mo = importlib.import_module(MOD + ".src.operators.material_operator")
 ju = importlib.import_module(MOD + ".src.utils")
 jd = importlib.import_module(MOD + ".src.json_definitions")
 done = set()
 missing = set()
 problems = []
-for slot in mo.get_materials():
+for slot in [] if textures_cached else mo.get_materials():
     if not slot.material or not slot.material.node_tree:
         continue
     n = slot.name.split(".")[0]
@@ -191,16 +212,6 @@ sc.frame_set(1)
 phase("pose")
 
 
-def bake_folder(size):
-    # The baked textures depend on the loadout, not the stance (a pose moves vertices, not UVs): keep them per loadout.
-    cache = os.environ.get("ISR_BAKE_CACHE")
-    if not cache:
-        return None
-    renderer = hashlib.sha256(Path(sys.argv[sys.argv.index("--python") + 1]).read_bytes()).hexdigest()
-    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, size], sort_keys=True)
-    return Path(cache) / hashlib.sha256(ident.encode()).hexdigest()[:32]
-
-
 def bake_object(obj, passes, size, images):
     for x in bpy.data.objects:
         x.select_set(False)
@@ -231,10 +242,10 @@ def bake_to_plain_materials(size):
     sc.cycles.device = "CPU"
     sc.cycles.samples = 1
     sc.cycles.use_denoising = False
-    passes = (("color", "DIFFUSE", "sRGB"), ("rough", "ROUGHNESS", "Non-Color"), ("normal", "NORMAL", "Non-Color"), ("emit", "EMIT", "sRGB"))
+    passes = BAKE_PASSES
     folder = bake_folder(size)
     for obj in keep:
-        files = {key: folder / f"{re.sub(r'[^A-Za-z0-9._-]+', '-', obj.name)}_{key}.png" for key, _, _ in passes} if folder else {}
+        files = bake_files(obj, folder) if folder else {}
         images = {}
         if files and all(f.exists() for f in files.values()):
             for key, _, space in passes:
@@ -296,7 +307,7 @@ if output == "glb":
             x.modifiers.remove(m)
         x.data = posed
     phase("mesh")
-    bake_to_plain_materials(2048 if full else 1024)
+    bake_to_plain_materials(bake_size)
     for x in keep:
         x.select_set(True)
     bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", use_selection=True, export_apply=True, export_image_format="JPEG", export_jpeg_quality=85)
