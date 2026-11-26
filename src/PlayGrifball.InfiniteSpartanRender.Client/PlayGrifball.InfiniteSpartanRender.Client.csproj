@@ -5,10 +5,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <RootNamespace>Surprenant.InfiniteSpartanRender.Client</RootNamespace>
-    <PackageId>Surprenant.InfiniteSpartanRender.Client</PackageId>
+    <RootNamespace>PlayGrifball.InfiniteSpartanRender.Client</RootNamespace>
+    <PackageId>PlayGrifball.InfiniteSpartanRender.Client</PackageId>
     <Version>0.0.0.1-beta</Version>
-    <Authors>Noah Surprenant</Authors>
+    <Authors>PlayGrifball</Authors>
     <Description>.NET client for the Infinite Spartan Render API: ask for a Halo Infinite Spartan as a PNG or GLB and download the result.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/PlayGrifball/infinite-spartan-render</PackageProjectUrl>

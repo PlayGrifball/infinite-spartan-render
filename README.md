@@ -79,7 +79,7 @@ Licensed MIT; Ekur is GPL-3.0 and is fetched at image build time.
 
 ## .NET client
 
-`Surprenant.InfiniteSpartanRender.Client` (`src/Surprenant.InfiniteSpartanRender.Client`, see its README) is a typed
+`PlayGrifball.InfiniteSpartanRender.Client` (`src/PlayGrifball.InfiniteSpartanRender.Client`, see its README) is a typed
 `HttpClient` for this API. It is published to nuget.org and GitHub Packages with each release whose commit changed the
 client, at the release's version (`publish.yml`, called by `helm-chart.yml`).
 

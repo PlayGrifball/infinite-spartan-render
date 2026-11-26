@@ -1,5 +1,5 @@
 <Solution>
   <Project Path="src/InfiniteSpartanRender/InfiniteSpartanRender.csproj" />
-  <Project Path="src/Surprenant.InfiniteSpartanRender.Client/Surprenant.InfiniteSpartanRender.Client.csproj" />
+  <Project Path="src/PlayGrifball.InfiniteSpartanRender.Client/PlayGrifball.InfiniteSpartanRender.Client.csproj" />
   <Project Path="tests/InfiniteSpartanRender.Tests/InfiniteSpartanRender.Tests.csproj" />
 </Solution>

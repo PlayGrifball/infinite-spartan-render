@@ -1,4 +1,4 @@
-# `Surprenant.InfiniteSpartanRender.Client`
+# `PlayGrifball.InfiniteSpartanRender.Client`
 
 .NET client for the [Infinite Spartan Render](https://github.com/PlayGrifball/infinite-spartan-render) API, which renders a
 Halo Infinite Spartan to a PNG or exports it as a GLB.
@@ -6,11 +6,11 @@ Halo Infinite Spartan to a PNG or exports it as a GLB.
 ## Install
 
 ```shell
-dotnet add package Surprenant.InfiniteSpartanRender.Client
+dotnet add package PlayGrifball.InfiniteSpartanRender.Client
 ```
 
 ```csharp
-using Surprenant.InfiniteSpartanRender.Client;
+using PlayGrifball.InfiniteSpartanRender.Client;
 
 builder.Services.AddInfiniteSpartanRenderClient(o => o.BaseAddress = new Uri("http://infinite-spartan-render:8080/"));
 // or from configuration: builder.Services.AddInfiniteSpartanRenderClient(builder.Configuration.GetSection("SpartanRender"));

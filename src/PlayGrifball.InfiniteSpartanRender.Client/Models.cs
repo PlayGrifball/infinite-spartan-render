@@ -1,4 +1,4 @@
-namespace Surprenant.InfiniteSpartanRender.Client;
+namespace PlayGrifball.InfiniteSpartanRender.Client;
 
 /// <summary>What to render: a core, its armor pieces and coating, and how.</summary>
 public sealed record SpartanLoadout

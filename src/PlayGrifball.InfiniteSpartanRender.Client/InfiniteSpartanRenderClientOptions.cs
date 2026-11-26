@@ -1,4 +1,4 @@
-namespace Surprenant.InfiniteSpartanRender.Client;
+namespace PlayGrifball.InfiniteSpartanRender.Client;
 
 /// <summary>Settings for <see cref="InfiniteSpartanRenderClient"/> (e.g. section <c>SpartanRender</c>).</summary>
 public sealed class InfiniteSpartanRenderClientOptions

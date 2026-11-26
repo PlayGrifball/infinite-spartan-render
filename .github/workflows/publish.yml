@@ -1,4 +1,4 @@
-# Publishes the .NET client (Surprenant.InfiniteSpartanRender.Client) to nuget.org and GitHub Packages. It is called by
+# Publishes the .NET client (PlayGrifball.InfiniteSpartanRender.Client) to nuget.org and GitHub Packages. It is called by
 # helm-chart.yml with each release's version, so a merge to main that changes the client publishes it, and a merge that
 # only changes the service does not. nuget.org uses OIDC trusted publishing (no key stored); GitHub Packages uses the
 # workflow's GITHUB_TOKEN. The nuget.org policy must trust PlayGrifball/infinite-spartan-render, workflow file publish.yml.
@@ -59,7 +59,7 @@ jobs:
           if [ "$ONLY_IF_CHANGED" = true ]; then
             current="infinite-spartan-render-$version"
             previous=$(git tag --list 'infinite-spartan-render-*' --sort=-version:refname | grep -Fxv "$current" | head -1 || true)
-            if [ -n "$previous" ] && git diff --quiet "$previous" HEAD -- src/Surprenant.InfiniteSpartanRender.Client; then
+            if [ -n "$previous" ] && git diff --quiet "$previous" HEAD -- src/PlayGrifball.InfiniteSpartanRender.Client; then
               nuget=false
             fi
           fi
@@ -81,7 +81,7 @@ jobs:
       - name: Pack
         env:
           VERSION: ${{ needs.plan.outputs.version }}
-        run: dotnet pack src/Surprenant.InfiniteSpartanRender.Client/Surprenant.InfiniteSpartanRender.Client.csproj --configuration Release --output out -p:PackageVersion="$VERSION"
+        run: dotnet pack src/PlayGrifball.InfiniteSpartanRender.Client/PlayGrifball.InfiniteSpartanRender.Client.csproj --configuration Release --output out -p:PackageVersion="$VERSION"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nuget-client

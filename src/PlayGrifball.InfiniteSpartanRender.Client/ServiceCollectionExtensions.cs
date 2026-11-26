@@ -2,7 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
-namespace Surprenant.InfiniteSpartanRender.Client;
+namespace PlayGrifball.InfiniteSpartanRender.Client;
 
 public static class ServiceCollectionExtensions
 {

@@ -2,7 +2,7 @@ using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text;
 using System.Text.Json;
-using Surprenant.InfiniteSpartanRender.Client;
+using PlayGrifball.InfiniteSpartanRender.Client;
 
 namespace InfiniteSpartanRender.Tests;
 

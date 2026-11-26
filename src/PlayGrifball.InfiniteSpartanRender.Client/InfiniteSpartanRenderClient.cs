@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 
-namespace Surprenant.InfiniteSpartanRender.Client;
+namespace PlayGrifball.InfiniteSpartanRender.Client;
 
 /// <summary>The API refused or could not answer: <see cref="StatusCode"/> 400 (invalid loadout), 429 (rate limit), 503 (queue full).</summary>
 public sealed class SpartanRenderException(HttpStatusCode statusCode, string message, TimeSpan? retryAfter = null) : Exception(message)
