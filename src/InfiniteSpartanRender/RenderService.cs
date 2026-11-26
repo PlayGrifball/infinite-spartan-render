@@ -115,6 +115,8 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
             catch (OperationCanceledException) { }
         }, stoppingToken);
 
+        if (options.Value.WarmImports) _ = Task.Run(() => WarmImports(slots, stoppingToken), CancellationToken.None);
+
         try
         {
             while (true)
@@ -134,6 +136,30 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         }
         catch (OperationCanceledException) { }
         await Task.WhenAll(running);
+    }
+
+    // Opens each core once so its imported scene is saved before a request needs it; one core at a time, holding a
+    // slot like any job. Daily, so the files are touched and the sweep never drops a core in use.
+    private async Task WarmImports(SemaphoreSlim slots, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var daily = new PeriodicTimer(TimeSpan.FromDays(1));
+            do
+            {
+                foreach (var core in options.Value.Cores)
+                {
+                    await slots.WaitAsync(cancellationToken);
+                    var marker = PathFor("warm-" + Guid.NewGuid().ToString("N") + ".partial", "warm");
+                    try { await runner.RunAsync(new Loadout { Core = core, Output = "warm" }, marker, cancellationToken); }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception e) { logger.LogError(e, "Warming the import of {Core} failed", core); }
+                    finally { File.Delete(marker); slots.Release(); }
+                }
+            }
+            while (await daily.WaitForNextTickAsync(cancellationToken));
+        }
+        catch (OperationCanceledException) { }
     }
 
     private async Task RunJob(string id, Loadout loadout, CancellationToken cancellationToken)

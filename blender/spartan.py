@@ -81,6 +81,9 @@ def import_core():
 import_core()
 sc = bpy.context.scene
 phase("import")
+if output == "warm":
+    Path(out).write_text("warm")
+    sys.exit(0)
 
 
 def region_key(col):
