@@ -38,7 +38,11 @@ public class ApiTests
     private HttpClient _client = null!;
 
     [SetUp]
-    public void SetUp() => Start();
+    public void SetUp()
+    {
+        _settings.Clear();
+        Start();
+    }
 
     private void Start()
     {
