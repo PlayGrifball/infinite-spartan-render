@@ -1,0 +1,134 @@
+# Publishes the .NET client (Surprenant.InfiniteSpartanRender.Client) to nuget.org and GitHub Packages. It is called by
+# helm-chart.yml with each release's version, so a merge to main that changes the client publishes it, and a merge that
+# only changes the service does not. nuget.org uses OIDC trusted publishing (no key stored); GitHub Packages uses the
+# workflow's GITHUB_TOKEN. The nuget.org policy must trust PlayGrifball/infinite-spartan-render, workflow file publish.yml.
+# https://learn.microsoft.com/nuget/nuget-org/trusted-publishing
+name: Publish client package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version, e.g. 0.1.0'
+        required: true
+  workflow_call:
+    inputs:
+      version:
+        description: 'Package version supplied by the release'
+        required: true
+        type: string
+      only_if_changed:
+        description: 'Publish only when the client changed since the previous release'
+        required: false
+        default: false
+        type: boolean
+    outputs:
+      version:
+        description: 'The package version considered by this run'
+        value: ${{ jobs.plan.outputs.version }}
+      nuget:
+        description: 'Whether the client was published for this release'
+        value: ${{ jobs.plan.outputs.nuget }}
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      nuget: ${{ steps.plan.outputs.nuget }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Version and package plan
+        id: plan
+        env:
+          INPUT_VERSION: ${{ inputs.version || github.event.inputs.version }}
+          ONLY_IF_CHANGED: ${{ inputs.only_if_changed || false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${INPUT_VERSION#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          nuget=true
+          if [ "$ONLY_IF_CHANGED" = true ]; then
+            current="infinite-spartan-render-$version"
+            previous=$(git tag --list 'infinite-spartan-render-*' --sort=-version:refname | grep -Fxv "$current" | head -1 || true)
+            if [ -n "$previous" ] && git diff --quiet "$previous" HEAD -- src/Surprenant.InfiniteSpartanRender.Client; then
+              nuget=false
+            fi
+          fi
+          echo "nuget=$nuget" >> "$GITHUB_OUTPUT"
+          echo "NuGet: $nuget; version: $version"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.nuget == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Test
+        run: dotnet test InfiniteSpartanRender.slnx --configuration Release --filter "TestCategory!=Integration"
+      - name: Pack
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: dotnet pack src/Surprenant.InfiniteSpartanRender.Client/Surprenant.InfiniteSpartanRender.Client.csproj --configuration Release --output out -p:PackageVersion="$VERSION"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nuget-client
+          path: out/*nupkg
+          if-no-files-found: error
+
+  nuget-org:
+    needs: [plan, build]
+    if: needs.plan.outputs.nuget == 'true'
+    runs-on: ubuntu-latest
+    environment: nuget
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nuget-client
+          path: out
+      # Right before the push: the key is valid for one hour.
+      - name: NuGet login
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: NoahSurprenant
+      - name: Publish to nuget.org
+        run: dotnet nuget push "out/*.nupkg" --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  nuget-github:
+    needs: [plan, build]
+    if: needs.plan.outputs.nuget == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nuget-client
+          path: out
+      - name: Publish to GitHub Packages
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: dotnet nuget push "out/*.nupkg" --api-key "$GITHUB_TOKEN" --source https://nuget.pkg.github.com/PlayGrifball/index.json --skip-duplicate

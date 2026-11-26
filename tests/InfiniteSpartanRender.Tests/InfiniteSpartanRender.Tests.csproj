@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\InfiniteSpartanRender\InfiniteSpartanRender.csproj" />
+    <ProjectReference Include="..\..\src\Surprenant.InfiniteSpartanRender.Client\Surprenant.InfiniteSpartanRender.Client.csproj" />
   </ItemGroup>
 
 </Project>
