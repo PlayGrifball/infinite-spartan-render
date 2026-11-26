@@ -12,6 +12,7 @@ public sealed record SpartanSetRequest
     public Dictionary<string, string>? Armor { get; init; } = new();
     public List<PartId>? Parts { get; init; } = new();
     public string? Coating { get; init; }
+    public string? Visor { get; init; }
     // A StanceId from a player's action pose item.
     public int? Stance { get; init; }
     public string Size { get; init; } = "small";
@@ -23,7 +24,7 @@ public sealed record SpartanSetRequest
         var items = new List<(string, Loadout)>();
         foreach (var (pose, stance) in new[] { ("stance", chosen), ("neutral", (int?)null) })
         {
-            var basis = new Loadout { Core = Core, Armor = Armor, Parts = Parts, Coating = Coating, Size = Size, Stance = stance };
+            var basis = new Loadout { Core = Core, Armor = Armor, Parts = Parts, Coating = Coating, Visor = Visor, Size = Size, Stance = stance };
             items.Add(($"{pose}-body", basis with { Output = "png", Framing = "body" }));
             items.Add(($"{pose}-head", basis with { Output = "png", Framing = "head" }));
             items.Add(($"{pose}-glb", basis with { Output = "glb" }));
@@ -31,10 +32,10 @@ public sealed record SpartanSetRequest
         return items;
     }
 
-    public string? Validate(IReadOnlyCollection<string> cores)
+    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null)
     {
         if (Stance is null) return "stance is required";
-        return Items()[0].Loadout.Validate(cores);
+        return Items()[0].Loadout.Validate(cores, visors);
     }
 
     public string Id(string renderer = "") => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(',', Items().Select(i => i.Loadout.Id(renderer))))))[..32].ToLowerInvariant();

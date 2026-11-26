@@ -18,6 +18,8 @@ public sealed record Loadout
     public List<PartId>? Parts { get; init; } = new();
     // A coating id from the core's stylelists; empty means the default coating.
     public string? Coating { get; init; }
+    // A visor title from the catalog; empty means the core's default visor.
+    public string? Visor { get; init; }
     public string Output { get; init; } = "png";
     public string Size { get; init; } = "small";
     // body | head: the head frames the helmet only.
@@ -27,7 +29,7 @@ public sealed record Loadout
 
     private static readonly Regex CoatingId = new(@"^-?\d{1,12}$", RegexOptions.Compiled);
 
-    public string? Validate(IReadOnlyCollection<string> cores)
+    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null)
     {
         if (string.IsNullOrWhiteSpace(Core) || Core.Length > 64) return "core is required (at most 64 characters)";
         if (!cores.Contains(Core)) return $"core must be one of: {string.Join(", ", cores)}";
@@ -43,6 +45,7 @@ public sealed record Loadout
         if (Parts.Any(p => p is null)) return "parts entries must be objects with region and permutation";
         if (Parts.Select(p => p.Region).Distinct().Count() != Parts.Count) return "parts has one entry per region";
         if (!string.IsNullOrEmpty(Coating) && !CoatingId.IsMatch(Coating)) return "coating must be a numeric coating id";
+        if (!string.IsNullOrEmpty(Visor) && visors is not null && !visors.Contains(Visor)) return "visor must be a title from the catalog";
         if (Output is not ("png" or "glb")) return "output must be png or glb";
         if (Size is not ("small" or "full")) return "size must be small or full";
         if (Framing is not ("body" or "head")) return "framing must be body or head";
@@ -60,6 +63,7 @@ public sealed record Loadout
             armor = (Armor ?? new()).OrderBy(a => a.Key, StringComparer.Ordinal).Select(a => new[] { a.Key, a.Value }),
             parts = (Parts ?? new()).OrderBy(p => p.Region).Select(p => new[] { p.Region, p.Permutation }),
             coating = string.IsNullOrEmpty(Coating) ? "" : Coating,
+            visor = string.IsNullOrEmpty(Visor) ? "" : Visor,
             output = Output,
             size = Size,
             framing = Framing,

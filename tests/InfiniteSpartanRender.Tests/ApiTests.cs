@@ -211,6 +211,26 @@ public class ApiTests
     }
 
     [Test]
+    public async Task AVisorOutsideTheCatalog_IsRefused_AndOneInsideIsRendered()
+    {
+        var assets = Scratch();
+        await File.WriteAllTextAsync(Path.Combine(assets, "all_visors.json"), """{"Alpha":{}}""");
+        _settings["Render:EkurAssets"] = assets;
+        Start();
+
+        var refused = await _client.PostAsJsonAsync("/spartan-sets", new { core = "Mark VII", stance = 1, visor = "Nope" });
+        var set = await _client.PostAsJsonAsync("/spartan-sets", new { core = "Mark VII", stance = 1, visor = "Alpha" });
+        var loadout = await _client.PostAsJsonAsync("/spartans", new { core = "Mark VII", visor = "Nope" });
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(refused.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+            Assert.That(set.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+            Assert.That(loadout.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+        }
+    }
+
+    [Test]
     public async Task ASetsNeutralItems_UseTheDefaultStance_AndItsOtherItemsTheChosenOne()
     {
         var id = (await (await _client.PostAsJsonAsync("/spartan-sets", SetBody(5))).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
@@ -648,6 +668,40 @@ public class LoadoutTests
         var set = new SpartanSetRequest { Core = "x", Stance = 7, Parts = new() { new(1, 2) } };
 
         Assert.That(set.Items().Select(i => i.Loadout.Parts), Has.All.EqualTo(new List<PartId> { new(1, 2) }));
+    }
+
+    [Test]
+    public void ADifferentVisor_ChangesTheId()
+    {
+        Assert.That(new Loadout { Core = "x", Visor = "A" }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Visor = "B" }.Id()));
+        Assert.That(new Loadout { Core = "x", Visor = "" }.Id(), Is.EqualTo(new Loadout { Core = "x" }.Id()), "no visor and an empty one are the same loadout");
+    }
+
+    [Test]
+    public void AVisor_MustBeInTheCatalog_WhenTheCatalogIsGiven()
+    {
+        var loadout = new Loadout { Core = "x", Visor = "Nope" };
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(loadout.Validate(new[] { "x" }, new[] { "Alpha" }), Does.Contain("visor must be a title from the catalog"));
+            Assert.That((loadout with { Visor = "Alpha" }).Validate(new[] { "x" }, new[] { "Alpha" }), Is.Null);
+            Assert.That((loadout with { Visor = null }).Validate(new[] { "x" }, new[] { "Alpha" }), Is.Null, "no visor is the core's default");
+        }
+    }
+
+    [Test]
+    public void ASetPassesItsVisorToEverySixItems_AndChecksItAgainstTheCatalog()
+    {
+        var set = new SpartanSetRequest { Core = "x", Stance = 7, Visor = "Alpha" };
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(set.Items().Select(i => i.Loadout.Visor), Has.All.EqualTo("Alpha"));
+            Assert.That(set.Validate(new[] { "x" }, new[] { "Alpha" }), Is.Null);
+            Assert.That(set.Validate(new[] { "x" }, new[] { "Beta" }), Does.Contain("visor"));
+            Assert.That(set.Id(), Is.Not.EqualTo((set with { Visor = "Beta" }).Id()));
+        }
     }
 
     [Test]

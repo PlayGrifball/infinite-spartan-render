@@ -17,6 +17,7 @@ POST /spartans
   "armor": { "helmet": "<permutation name>", "<region>": "<permutation name>" },
   "parts": [ { "region": -592012529, "permutation": 1704860283 } ],   // optional: pieces by the game's ids
   "coating": "1120495519",
+  "visor": "2024 FaZE Launch",
   "output": "png",     // png | glb
   "size": "small",     // small | full
   "framing": "body",   // body | head (head frames the helmet)
@@ -58,7 +59,7 @@ warm-up from its saved import, so right after a start some cores are in `pending
 
 The id is a hash of the loadout and of the Blender script, so asking again returns the cached file, and a changed script never serves files an older one made. `parts` addresses a piece by the game's model region id and permutation id, for pieces that have no name (some kits). One
 entry per region; it wins over `armor` for that region, and a part that matches no mesh fails the render. A region left out of `armor` gets the core's
-default piece; `coating` left out gets the default coating.
+default piece; `coating` left out gets the default coating; `visor` left out gets the core's default visor, and a title not in the catalog's `visors` is refused.
 
 | size  | png                    | glb                       |
 |-------|------------------------|---------------------------|
