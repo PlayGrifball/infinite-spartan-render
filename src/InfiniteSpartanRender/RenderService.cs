@@ -9,7 +9,7 @@ public enum JobState { Queued, Running, Done, Failed }
 
 public sealed record JobStatus(string Id, JobState State, string? Error, DateTimeOffset At);
 
-public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions> options, ILogger<RenderService> logger) : BackgroundService
+public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions> options, CatalogService catalog, ILogger<RenderService> logger) : BackgroundService
 {
     // What clients see of a failure; Blender's own output goes to the log only.
     public const string FailureMessage = "The render failed; ask again, and report it if it keeps failing.";
@@ -30,6 +30,8 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         var script = options.Value.ScriptPath;
         return File.Exists(script) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(script)))[..12] : "";
     });
+
+    public Catalog Catalog() => catalog.Get(_renderer.Value);
 
     private string IdOf(Loadout loadout) => loadout.Id(_renderer.Value);
 
@@ -150,7 +152,11 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
                 {
                     await slots.WaitAsync(cancellationToken);
                     var marker = PathFor("warm-" + Guid.NewGuid().ToString("N") + ".partial", "warm");
-                    try { await runner.RunAsync(new Loadout { Core = core, Output = "warm" }, marker, cancellationToken); }
+                    try
+                    {
+                        await runner.RunAsync(new Loadout { Core = core, Output = "warm" }, marker, cancellationToken);
+                        await WriteCatalog(core, cancellationToken);
+                    }
                     catch (OperationCanceledException) { throw; }
                     catch (Exception e) { logger.LogError(e, "Warming the import of {Core} failed", core); }
                     finally { File.Delete(marker); slots.Release(); }
@@ -159,6 +165,20 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
             while (await daily.WaitForNextTickAsync(cancellationToken));
         }
         catch (OperationCanceledException) { }
+    }
+
+    // The core's pieces, read from its saved import (quick once the import exists), kept for GET /catalog. Made again with every warm: an updated Ekur or Blender may have changed them.
+    private async Task WriteCatalog(string core, CancellationToken cancellationToken)
+    {
+        var final = catalog.PathFor(core, _renderer.Value);
+        var partial = final + ".partial.json";
+        Directory.CreateDirectory(Path.GetDirectoryName(final)!);
+        try
+        {
+            await runner.RunAsync(new Loadout { Core = core, Output = "catalog" }, partial, cancellationToken);
+            File.Move(partial, final, overwrite: true);
+        }
+        finally { File.Delete(partial); }
     }
 
     private async Task RunJob(string id, Loadout loadout, CancellationToken cancellationToken)

@@ -15,6 +15,7 @@ POST /spartans
 {
   "core": "Mark VII",
   "armor": { "helmet": "<permutation name>", "<region>": "<permutation name>" },
+  "parts": [ { "region": -592012529, "permutation": 1704860283 } ],   // optional: pieces by the game's ids
   "coating": "1120495519",
   "output": "png",     // png | glb
   "size": "small",     // small | full
@@ -41,7 +42,22 @@ The six items are `stance-glb`, `stance-body`, `stance-head`, `neutral-glb`, `ne
 `url` is a `/spartans/{id}/file`. They are ordinary jobs (the same cache, queue and limits), so a set whose pieces were
 rendered before costs nothing, and a GLB takes minutes. Sets, like jobs, do not survive a restart: post again.
 
-The id is a hash of the loadout and of the Blender script, so asking again returns the cached file, and a changed script never serves files an older one made. A region left out of `armor` gets the core's
+`GET /catalog` lists what a loadout may name:
+
+```
+{ "cores": [ { "name": "Mark VII", "regions": [ { "kind": "REGION", "key": "helmet", "region": -592012529,
+                "pieces": [ { "permutation": 123, "name": "Mark VII" }, { "permutation": 456, "name": null } ] } ] } ],
+  "coatings": [ "-1973444192", "..." ],   // style ids, the `coating` field
+  "visors": [ "...titles..." ],
+  "pendingCores": [ "Chimera" ] }          // still importing; they join when their import is done
+```
+
+A piece of a REGION with a `name` goes in `armor` under its region `key` (a KIT region's pieces go in `parts`); a piece with `name` null (some kits) goes in `parts` by
+`region` and `permutation`. `kind` is REGION, or KIT for a kit's own regions. A core's entry is written by the start-up
+warm-up from its saved import, so right after a start some cores are in `pendingCores`.
+
+The id is a hash of the loadout and of the Blender script, so asking again returns the cached file, and a changed script never serves files an older one made. `parts` addresses a piece by the game's model region id and permutation id, for pieces that have no name (some kits). One
+entry per region; it wins over `armor` for that region, and a part that matches no mesh fails the render. A region left out of `armor` gets the core's
 default piece; `coating` left out gets the default coating.
 
 | size  | png                    | glb                       |

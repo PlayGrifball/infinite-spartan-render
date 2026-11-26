@@ -23,6 +23,7 @@ A render takes minutes, so asking returns a job. An identical earlier request is
 ```csharp
 // One file
 var png = await client.RenderAsync(new SpartanLoadout { Core = "Mark VII", Armor = { ["helmet"] = "Mk 7" } });
+// A piece with no name (some kits) by region id and permutation id: Parts = { new SpartanPart(-592012529, 1704860283) }
 
 // The pieces of the flow
 var job = await client.SubmitAsync(new SpartanLoadout { Core = "Yoroi", Output = "glb" });

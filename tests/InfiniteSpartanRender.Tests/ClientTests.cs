@@ -32,7 +32,7 @@ public class ClientTests
     {
         var stub = new Stub((_, _) => Reply(HttpStatusCode.Accepted, """{"id":"abc","state":"queued","output":"glb"}"""));
 
-        var job = await ClientFor(stub).SubmitAsync(new SpartanLoadout { Core = "Mark VII", Output = "glb", Stance = 7, Armor = { ["helmet"] = "Mk 7" } });
+        var job = await ClientFor(stub).SubmitAsync(new SpartanLoadout { Core = "Mark VII", Output = "glb", Stance = 7, Armor = { ["helmet"] = "Mk 7" }, Parts = { new SpartanPart(-592012529, 1704860283) } });
 
         Assert.That(job, Is.EqualTo(new SpartanJob("abc", "queued", "glb")));
         var sent = stub.Requests.Single();
@@ -42,6 +42,24 @@ public class ClientTests
         Assert.That(body.GetProperty("output").GetString(), Is.EqualTo("glb"));
         Assert.That(body.GetProperty("stance").GetInt32(), Is.EqualTo(7));
         Assert.That(body.GetProperty("armor").GetProperty("helmet").GetString(), Is.EqualTo("Mk 7"));
+        var part = body.GetProperty("parts").EnumerateArray().Single();
+        Assert.That((part.GetProperty("region").GetInt32(), part.GetProperty("permutation").GetInt32()), Is.EqualTo((-592012529, 1704860283)));
+    }
+
+    [Test]
+    public async Task GetCatalog_ReadsCoresPiecesCoatingsAndVisors()
+    {
+        var stub = new Stub((_, _) => Reply(HttpStatusCode.OK, """{"cores":[{"name":"Mark VII","regions":[{"kind":"KIT","key":"helmet","region":-5,"pieces":[{"permutation":7,"name":null}]}]}],"coatings":["-1"],"visors":["V"],"pendingCores":["Yoroi"]}"""));
+
+        var catalog = await ClientFor(stub).GetCatalogAsync();
+
+        var region = catalog.Cores.Single().Regions.Single();
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(stub.Requests.Single().Path, Is.EqualTo("/catalog"));
+            Assert.That((region.Kind, region.Key, region.Region, region.Pieces.Single()), Is.EqualTo(("KIT", "helmet", -5, new SpartanCatalogPiece(7, null))));
+            Assert.That((catalog.Coatings, catalog.Visors, catalog.PendingCores), Is.EqualTo((new[] { "-1" }, new[] { "V" }, new[] { "Yoroi" })));
+        }
     }
 
     [Test]

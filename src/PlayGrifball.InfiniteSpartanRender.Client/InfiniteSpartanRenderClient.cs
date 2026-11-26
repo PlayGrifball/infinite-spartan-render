@@ -60,6 +60,13 @@ public sealed class InfiniteSpartanRenderClient(HttpClient http)
         return await GetFileAsync(job.Id, cancellationToken);
     }
 
+    /// <summary>What a loadout may name: the cores with their pieces, the coating ids and the visor titles.</summary>
+    public async Task<SpartanCatalog> GetCatalogAsync(CancellationToken cancellationToken = default)
+    {
+        using var response = await http.GetAsync("catalog", cancellationToken);
+        return await ReadAsync<SpartanCatalog>(response, cancellationToken);
+    }
+
     /// <summary>Asks for the six files of a Spartan in a stance and in the neutral one.</summary>
     public async Task<SpartanSet> SubmitSetAsync(SpartanSetRequest request, CancellationToken cancellationToken = default)
     {

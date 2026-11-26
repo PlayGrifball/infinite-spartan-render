@@ -34,6 +34,7 @@ loadout = json.loads(Path(loadout_path).read_text())
 core = loadout["Core"]
 armor = loadout.get("Armor") or {}
 coating = loadout.get("Coating") or ""
+parts = {int(p["Region"]): int(p["Permutation"]) for p in (loadout.get("Parts") or [])}
 output = loadout.get("Output", "png")
 full = loadout.get("Size") == "full"
 stance_id = loadout.get("Stance")
@@ -98,7 +99,6 @@ if output == "warm":
     Path(out).write_text("warm")
     sys.exit(0)
 
-
 def region_key(col):
     name = col.name.removeprefix("[REGION] ")
     return name.split("_", 1)[1] if "_" in name else name
@@ -114,11 +114,81 @@ def default_permutation(objs, core):
     return named or real[0]
 
 
+def as_id(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def listing():
+    # Every mesh in the region and kit collections with its ids and the display name of its permutation.
+    rp = json.loads(ext.read_text())
+    display = {}
+    for region in rp.values():
+        for pid, perm in (region.get("permutations") or {}).items():
+            display[str(pid)] = perm.get("name")
+    rows = []
+    for col in bpy.data.collections:
+        if not col.name.startswith(("[REGION]", "[KIT]")):
+            continue
+        kind, _, rest = col.name[1:].partition("] ")
+        for x in col.objects:
+            if x.type != "MESH":
+                continue
+            pid = x.get("permutation_name")
+            want = display.get(str(pid))
+            base = x.name.split(".")[0] if re.search(r"\.\d{3}$", x.name) else x.name
+            rows.append({
+                "collection": col.name, "kind": kind, "key": rest.split("_", 1)[1] if "_" in rest else rest,
+                "object": x.name, "region": x.get("region_name"), "permutation": pid,
+                "display": want, "hashed": bool(HASHED.fullmatch(x.name)),
+                "nameMatches": bool(want) and base.endswith("_" + want),
+                "truncated": len(x.name) >= 63,
+            })
+    return rows
+
+
+if output == "names":
+    Path(out).write_text(json.dumps(listing()))
+    sys.exit(0)
+
+if output == "catalog":
+    # What this core can wear: per region (or kit region) the pieces, by the game's ids and, when it has one, a name.
+    regions = {}
+    for r in listing():
+        region, permutation = as_id(r["region"]), as_id(r["permutation"])
+        if region is None or permutation is None:
+            continue
+        g = regions.setdefault((r["kind"], r["key"]), {"kind": r["kind"], "key": r["key"], "region": region, "pieces": {}})
+        g["pieces"].setdefault(permutation, {"permutation": permutation, "name": r["display"]})
+    doc = {"core": core, "regions": [
+        {**g, "pieces": sorted(g["pieces"].values(), key=lambda p: (p["name"] is None, p["name"] or "", p["permutation"]))}
+        for g in sorted(regions.values(), key=lambda g: (g["kind"], g["key"]))]}
+    Path(out).write_text(json.dumps(doc))
+    sys.exit(0)
+
+
+def prop_id(obj, name):
+    return as_id(obj.get(name))
+
+
 keep = []
+matched_parts = set()
+# Pieces by id: a kit's meshes can sit in a [KIT] collection as well as in a [REGION] one.
+for col in bpy.data.collections:
+    if not col.name.startswith(("[REGION]", "[KIT]")):
+        continue
+    for x in col.objects:
+        r = prop_id(x, "region_name")
+        if x.type == "MESH" and r in parts and prop_id(x, "permutation_name") == parts[r]:
+            keep.append(x)
+            matched_parts.add(r)
 for col in bpy.data.collections:
     if not col.name.startswith("[REGION]"):
         continue
-    objs = sorted((x for x in col.objects if x.type == "MESH"), key=lambda x: x.name)
+    # A part replaces the default piece of its own region only: other regions sharing the collection keep theirs.
+    objs = sorted((x for x in col.objects if x.type == "MESH" and prop_id(x, "region_name") not in matched_parts), key=lambda x: x.name)
     if not objs:
         continue
     if all(HASHED.fullmatch(x.name) for x in objs):
@@ -131,6 +201,10 @@ for col in bpy.data.collections:
         sys.exit(f"No permutation '{wanted}' in region '{region_key(col)}'")
     chosen = chosen or default_permutation(objs, core)
     keep.append(chosen)
+
+missing_parts = {r: p for r, p in parts.items() if r not in matched_parts}
+if missing_parts:
+    sys.exit(f"No mesh for parts (region: permutation): {missing_parts}")
 
 unknown = set(armor) - {region_key(c) for c in bpy.data.collections if c.name.startswith("[REGION]")}
 if unknown:

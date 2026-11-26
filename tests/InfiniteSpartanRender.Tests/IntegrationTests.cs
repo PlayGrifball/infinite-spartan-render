@@ -213,6 +213,68 @@ public class IntegrationTests
         Assert.That(phases, Is.EqualTo(new[] { "import_cached" }), "only the check ran, no import or open");
     }
 
+    // The mapping gives a piece's permutation display name; the name-based `armor` input finds the object by it.
+    [Test]
+    public async Task ImportedObjects_CarryTheIdsAndTheirNamesEndInThePermutationName()
+    {
+        var output = Path.Combine(_work, "names-mark-vii.json");
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "names" }, output, CancellationToken.None);
+
+        Keep(output);
+        var rows = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(output)).RootElement.EnumerateArray().ToList();
+        Assert.That(rows, Is.Not.Empty);
+        var noIds = rows.Where(r => r.GetProperty("region").ValueKind == System.Text.Json.JsonValueKind.Null || r.GetProperty("permutation").ValueKind == System.Text.Json.JsonValueKind.Null).Select(r => r.GetProperty("object").GetString()).ToList();
+        Assert.That(noIds, Is.Empty, "objects without region_name/permutation_name: parts cannot select them");
+        var named = rows.Where(r => !r.GetProperty("hashed").GetBoolean()).ToList();
+        var mismatched = named.Where(r => !r.GetProperty("nameMatches").GetBoolean()).Select(r => $"{r.GetProperty("object").GetString()} (permutation {r.GetProperty("permutation")}, display '{r.GetProperty("display").GetString()}')").ToList();
+        Assert.That(mismatched, Is.Empty, "named objects whose name does not end in the permutation's display name; of " + named.Count);
+        Assert.That(rows.Count(r => r.GetProperty("truncated").GetBoolean()), Is.Zero, "object names cut at Blender's 63 characters");
+    }
+
+    [Test]
+    public async Task TheCatalogOfACore_ListsRegionsWithNamedAndUnnamedPieces()
+    {
+        var output = Path.Combine(_work, "catalog-mark-vii.json");
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "catalog" }, output, CancellationToken.None);
+
+        Keep(output);
+        var regions = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(output)).RootElement.GetProperty("regions").EnumerateArray().ToList();
+        Assert.That(regions.Select(r => r.GetProperty("key").GetString()), Does.Contain("helmet"));
+        var helmet = regions.First(r => r.GetProperty("key").GetString() == "helmet");
+        Assert.That(helmet.GetProperty("pieces").GetArrayLength(), Is.GreaterThan(1), "a core offers more than its own helmet");
+        Assert.That(helmet.GetProperty("pieces").EnumerateArray().Select(p => p.GetProperty("name").GetString()), Does.Contain("Mark VII"));
+    }
+
+    [Test]
+    public async Task APieceByIds_ExportsAGlb()
+    {
+        // A piece of the core's own catalog, an unnamed one first: those are only addressable by region and permutation id.
+        var catalogFile = Path.Combine(_work, "catalog-for-ids.json");
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "catalog" }, catalogFile, CancellationToken.None);
+        var pieces = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(catalogFile)).RootElement.GetProperty("regions").EnumerateArray()
+            .SelectMany(r => r.GetProperty("pieces").EnumerateArray().Select(p => (Region: r.GetProperty("region").GetInt32(), Permutation: p.GetProperty("permutation").GetInt32(), Named: p.GetProperty("name").ValueKind == System.Text.Json.JsonValueKind.String)))
+            .OrderBy(p => p.Named).ToList();
+        var piece = pieces.First();
+        var output = Path.Combine(_work, "piece-by-ids.glb");
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb", Parts = new() { new(piece.Region, piece.Permutation) } }, output, CancellationToken.None);
+
+        Keep(output);
+        Assert.That(System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(output), 0, 4), Is.EqualTo("glTF"));
+    }
+
+    [Test]
+    public void APieceThatMatchesNothing_FailsTheRender()
+    {
+        var output = Path.Combine(_work, "no-such-part.glb");
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb", Parts = new() { new(1, 2) } }, output, CancellationToken.None));
+
+        Assert.That(ex!.Message, Does.Contain("No mesh for parts"));
+    }
+
     [Test]
     public async Task AHeadshotInAStance_RendersAPng()
     {

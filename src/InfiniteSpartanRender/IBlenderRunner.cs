@@ -16,6 +16,7 @@ public sealed class RenderOptions
     public string ScriptPath { get; set; } = "/app/blender/spartan.py";
     public string CacheDirectory { get; set; } = "/cache";
     public string DataDirectory { get; set; } = "/data";
+    public string EkurAssets { get; set; } = "/opt/ekur/assets";
     public string WorkDirectory { get; set; } = "/tmp/render";
     public int MaxConcurrentJobs { get; set; } = 1;
     public int MaxQueued { get; set; } = 20;

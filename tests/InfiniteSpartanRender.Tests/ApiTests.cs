@@ -32,6 +32,11 @@ public class ApiTests
                 await File.WriteAllTextAsync(outputPath, "warm", cancellationToken);
                 return;
             }
+            if (loadout.Output == "catalog")
+            {
+                await File.WriteAllTextAsync(outputPath, """{"name":"x","regions":[{"kind":"REGION","key":"helmet","region":-5,"pieces":[{"permutation":7,"name":"Mk 7"},{"permutation":-9,"name":null}]}]}""", cancellationToken);
+                return;
+            }
             LastPath = outputPath;
             if (Gate is not null) await Gate.WaitAsync(cancellationToken);
             await Task.Delay(20, cancellationToken);
@@ -367,6 +372,163 @@ public class ApiTests
         Assert.That(Directory.EnumerateFiles(_cache, "*warm*"), Is.Empty, "the marker files are removed");
     }
 
+    private string Scratch()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "isr-data-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        return folder;
+    }
+
+    [Test]
+    public async Task TheCatalog_ListsWhatWarmedCoresCanWear_AndTheCoatingsAndVisors()
+    {
+        var data = Scratch();
+        var assets = Scratch();
+        Directory.CreateDirectory(Path.Combine(data, "stylelists"));
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "a.json"), """{"styles":{"-5":{},"12":{}}}""");
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "b.json"), """{"styles":{"12":{},"3":{}},"other":1}""");
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "c.json"), """{"nothing":1}""");
+        await File.WriteAllTextAsync(Path.Combine(assets, "all_visors.json"), """{"Zed":{},"Alpha":{}}""");
+        _settings["Render:WarmImports"] = "true";
+        _settings["Render:DataDirectory"] = data;
+        _settings["Render:EkurAssets"] = assets;
+        Start();
+        for (var i = 0; i < 100 && _runner.Warmed.Count < new RenderOptions().Cores.Length; i++) await Task.Delay(50);
+        JsonElement catalog = default;
+        for (var i = 0; i < 100; i++)
+        {
+            catalog = (await _client.GetFromJsonAsync<JsonElement>("/catalog"));
+            if (catalog.GetProperty("pendingCores").GetArrayLength() == 0) break;
+            await Task.Delay(50);
+        }
+
+        var core = catalog.GetProperty("cores").EnumerateArray().First(c => c.GetProperty("name").GetString() == "Mark VII");
+        var region = core.GetProperty("regions")[0];
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(catalog.GetProperty("pendingCores").GetArrayLength(), Is.Zero);
+            Assert.That(catalog.GetProperty("cores").GetArrayLength(), Is.EqualTo(new RenderOptions().Cores.Length));
+            Assert.That((region.GetProperty("kind").GetString(), region.GetProperty("key").GetString(), region.GetProperty("region").GetInt32()), Is.EqualTo(("REGION", "helmet", -5)));
+            Assert.That(region.GetProperty("pieces")[0].GetProperty("name").GetString(), Is.EqualTo("Mk 7"));
+            Assert.That(region.GetProperty("pieces")[1].GetProperty("name").ValueKind, Is.EqualTo(JsonValueKind.Null), "a piece with no name is reached by its ids");
+            Assert.That(catalog.GetProperty("coatings").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "-5", "12", "3" }));
+            Assert.That(catalog.GetProperty("visors").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "Alpha", "Zed" }));
+        }
+    }
+
+    [Test]
+    public async Task TheCatalog_BeforeAnyImport_ListsEveryCoreAsPending_AndNoCoatingsWithoutData()
+    {
+        _settings["Render:DataDirectory"] = Path.Combine(Path.GetTempPath(), "isr-missing-" + Guid.NewGuid().ToString("N"));
+        _settings["Render:EkurAssets"] = Path.Combine(Path.GetTempPath(), "isr-missing-" + Guid.NewGuid().ToString("N"));
+        Start();
+
+        var catalog = await _client.GetFromJsonAsync<JsonElement>("/catalog");
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(catalog.GetProperty("cores").GetArrayLength(), Is.Zero);
+            Assert.That(catalog.GetProperty("pendingCores").GetArrayLength(), Is.EqualTo(new RenderOptions().Cores.Length));
+            Assert.That(catalog.GetProperty("coatings").GetArrayLength(), Is.Zero);
+            Assert.That(catalog.GetProperty("visors").GetArrayLength(), Is.Zero);
+        }
+    }
+
+    [Test]
+    public async Task TheCatalog_TreatsABrokenCoreFileAsPending()
+    {
+        Start();
+        var path = _factory.Services.GetRequiredService<CatalogService>().PathFor("Mark VII", "");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, "{not json");
+
+        var catalog = await _client.GetFromJsonAsync<JsonElement>("/catalog");
+
+        Assert.That(catalog.GetProperty("pendingCores").EnumerateArray().Select(c => c.GetString()), Does.Contain("Mark VII"));
+    }
+
+    [Test]
+    public async Task AWarm_MakesTheCatalogAgain_SoAnUpdatedEkurOrBlenderIsNotListedStale()
+    {
+        var cache = Path.Combine(Path.GetTempPath(), "isr-cache-" + Guid.NewGuid().ToString("N"));
+        _settings["Render:CacheDirectory"] = cache;
+        _settings["Render:WarmImports"] = "true";
+        var path = new CatalogService(Microsoft.Extensions.Options.Options.Create(new RenderOptions { CacheDirectory = cache })).PathFor("Mark VII", "");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, """{"name":"Mark VII","regions":[]}""");
+        Start();
+        for (var i = 0; i < 100 && _runner.Warmed.Count < new RenderOptions().Cores.Length; i++) await Task.Delay(50);
+        for (var i = 0; i < 100 && !_runner.Loadouts.Any(l => l.Output == "catalog" && l.Core == "Mark VII"); i++) await Task.Delay(50);
+
+        Assert.That(_runner.Loadouts.Count(l => l.Output == "catalog" && l.Core == "Mark VII"), Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task TheCatalog_ReadsCoatingsAndVisorsAgain_WhenTheirFilesAppearLater()
+    {
+        var data = Scratch();
+        var assets = Scratch();
+        _settings["Render:DataDirectory"] = data;
+        _settings["Render:EkurAssets"] = assets;
+        Start();
+        var before = await _client.GetFromJsonAsync<JsonElement>("/catalog");
+        Directory.CreateDirectory(Path.Combine(data, "stylelists"));
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "a.json"), """{"styles":{"7":{}}}""");
+        await File.WriteAllTextAsync(Path.Combine(assets, "all_visors.json"), """{"Alpha":{}}""");
+
+        var after = await _client.GetFromJsonAsync<JsonElement>("/catalog");
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(before.GetProperty("coatings").GetArrayLength(), Is.Zero);
+            Assert.That(after.GetProperty("coatings").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "7" }));
+            Assert.That(after.GetProperty("visors").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "Alpha" }));
+        }
+    }
+
+    [Test]
+    public async Task TheCatalog_SkipsAMalformedStylelist_AndAMalformedVisorFile_InsteadOfFailing()
+    {
+        var data = Scratch();
+        var assets = Scratch();
+        Directory.CreateDirectory(Path.Combine(data, "stylelists"));
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "a.json"), """{"styles":{"7":{}}}""");
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "b.json"), "{truncated");
+        await File.WriteAllTextAsync(Path.Combine(assets, "all_visors.json"), "{truncated");
+        _settings["Render:DataDirectory"] = data;
+        _settings["Render:EkurAssets"] = assets;
+        Start();
+
+        var response = await _client.GetAsync("/catalog");
+        var catalog = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(System.Net.HttpStatusCode.OK));
+            Assert.That(catalog.GetProperty("coatings").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "7" }));
+            Assert.That(catalog.GetProperty("visors").GetArrayLength(), Is.Zero);
+        }
+    }
+
+    [Test]
+    public async Task TheCatalog_IsNotBuiltAgain_WhileNoFileChanged_ButIsWhenOneDoes()
+    {
+        var data = Scratch();
+        var service = new CatalogService(Microsoft.Extensions.Options.Options.Create(new RenderOptions { CacheDirectory = Scratch(), DataDirectory = data, EkurAssets = Scratch() }));
+        var first = service.Get("");
+        var second = service.Get("");
+        Directory.CreateDirectory(Path.Combine(data, "stylelists"));
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "a.json"), """{"styles":{"7":{}}}""");
+        var third = service.Get("");
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(second, Is.SameAs(first));
+            Assert.That(third, Is.Not.SameAs(first));
+            Assert.That(third.Coatings, Is.EqualTo(new[] { "7" }));
+        }
+    }
+
     [Test]
     public async Task AFailedWarm_DoesNotStopTheServiceRendering()
     {
@@ -432,6 +594,60 @@ public class LoadoutTests
         var b = new Loadout { Core = "Mark VII", Armor = new() { ["chest"] = "b", ["helmet"] = "a" } };
 
         Assert.That(a.Id(), Is.EqualTo(b.Id()));
+    }
+
+    [Test]
+    public void PartOrder_DoesNotChangeTheId()
+    {
+        var a = new Loadout { Core = "Mark VII", Parts = new() { new(1, 2), new(3, 4) } };
+        var b = new Loadout { Core = "Mark VII", Parts = new() { new(3, 4), new(1, 2) } };
+
+        Assert.That(a.Id(), Is.EqualTo(b.Id()));
+    }
+
+    [Test]
+    public void ADifferentPart_ChangesTheId()
+    {
+        Assert.That(new Loadout { Core = "x", Parts = new() { new(1, 2) } }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Parts = new() { new(1, 3) } }.Id()));
+        Assert.That(new Loadout { Core = "x", Parts = new() { new(1, 2) } }.Id(), Is.Not.EqualTo(new Loadout { Core = "x" }.Id()));
+    }
+
+    [Test]
+    public void PartsWithNegativeIds_AreValid()
+    {
+        var loadout = new Loadout { Core = "x", Parts = new() { new(-592012529, 1704860283), new(5, -189225007) } };
+
+        Assert.That(loadout.Validate(new[] { "x" }), Is.Null);
+    }
+
+    [Test]
+    public void TwoPartsInOneRegion_AreRefused()
+    {
+        var loadout = new Loadout { Core = "x", Parts = new() { new(1, 2), new(1, 3) } };
+
+        Assert.That(loadout.Validate(new[] { "x" }), Does.Contain("one entry per region"));
+    }
+
+    [Test]
+    public void TooManyParts_AreRefused()
+    {
+        var loadout = new Loadout { Core = "x", Parts = Enumerable.Range(0, 65).Select(i => new PartId(i, 1)).ToList() };
+
+        Assert.That(loadout.Validate(new[] { "x" }), Does.Contain("at most 64"));
+    }
+
+    [Test]
+    public void NullParts_AreRefused()
+    {
+        Assert.That(new Loadout { Core = "x", Parts = null }.Validate(new[] { "x" }), Does.Contain("parts must be an array"));
+    }
+
+    [Test]
+    public void ASetPassesItsPartsToEverySixItems()
+    {
+        var set = new SpartanSetRequest { Core = "x", Stance = 7, Parts = new() { new(1, 2) } };
+
+        Assert.That(set.Items().Select(i => i.Loadout.Parts), Has.All.EqualTo(new List<PartId> { new(1, 2) }));
     }
 
     [Test]
