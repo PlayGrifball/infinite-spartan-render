@@ -83,7 +83,7 @@ public class IntegrationTests
         WriteTimings();
         // Three tests render Mark VII: the first imports it (minutes), the others open the saved import.
         double[] imports;
-        lock (_phases) imports = _phases.Where(p => p.Phase == "import" && !p.Test.Contains("Yoroi") && !p.Test.Contains("WithoutABodyType") && !p.Test.Contains("Warmed")).Select(p => p.Seconds).ToArray();
+        lock (_phases) imports = _phases.Where(p => p.Phase == "import" && !p.Test.Contains("Yoroi") && !p.Test.Contains("WithoutABodyType") && !p.Test.Contains("Warm")).Select(p => p.Seconds).ToArray();
         if (imports.Length == 3) Assert.That(imports.Count(s => s < 60), Is.GreaterThanOrEqualTo(2), "a core's import is reused: " + string.Join(", ", imports));
         if (_work.Length > 0 && Directory.Exists(_work)) Directory.Delete(_work, recursive: true);
     }
@@ -196,6 +196,21 @@ public class IntegrationTests
         lock (_phases) import = _phases.Skip(mark).Where(p => p.Phase == "import").Sum(p => p.Seconds);
         Assert.That(import, Is.LessThan(60), "the render opens the warmed import instead of making it");
         Assert.That(new FileInfo(output).Length, Is.GreaterThan(20_000));
+    }
+
+    [Test]
+    public async Task WarmingACoreThatIsAlreadySaved_OpensNothing()
+    {
+        var marker = Path.Combine(_work, "again.warm");
+        await _runner.RunAsync(new Loadout { Core = "Mark IV", Output = "warm" }, marker, CancellationToken.None);
+        int mark;
+        lock (_phases) mark = _phases.Count;
+
+        await _runner.RunAsync(new Loadout { Core = "Mark IV", Output = "warm" }, Path.Combine(_work, "again2.warm"), CancellationToken.None);
+
+        string[] phases;
+        lock (_phases) phases = _phases.Skip(mark).Select(p => p.Phase).ToArray();
+        Assert.That(phases, Is.EqualTo(new[] { "import_cached" }), "only the check ran, no import or open");
     }
 
     [Test]

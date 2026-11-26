@@ -82,7 +82,7 @@ Importing a core takes minutes and does not depend on the loadout or stance, so 
 core open it. A GLB's baked textures do not depend on the stance either, so they are kept per loadout in
 `<cache>/bakes/<key>/` (the key adds the loadout and the Blender script) and a GLB in another stance of the same armor
 loads them instead of baking again. The service warms every core in `Cores` at startup (one at a time, in a job slot) and daily, so the first request
-for a core does not wait for its import; `WarmImports` (default true) turns that off. A changed game data folder needs `imports/` and `bakes/` cleared; files unused for
+for a core does not wait for its import (a core already saved is only touched, with no import or open); `WarmImports` (default true) turns that off. A changed game data folder needs `imports/` and `bakes/` cleared; files unused for
 `CacheDays` are swept.
 
 The stance is a Halo animation: a player's `actionPosePath` item (gateway `gamecms/item`) carries a `StanceId`, and
