@@ -233,6 +233,21 @@ public class IntegrationTests
     }
 
     [Test]
+    public async Task TheCatalogOfACore_ListsRegionsWithNamedAndUnnamedPieces()
+    {
+        var output = Path.Combine(_work, "catalog-mark-vii.json");
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "catalog" }, output, CancellationToken.None);
+
+        Keep(output);
+        var regions = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(output)).RootElement.GetProperty("regions").EnumerateArray().ToList();
+        Assert.That(regions.Select(r => r.GetProperty("key").GetString()), Does.Contain("helmet"));
+        var helmet = regions.First(r => r.GetProperty("key").GetString() == "helmet");
+        Assert.That(helmet.GetProperty("pieces").GetArrayLength(), Is.GreaterThan(1), "a core offers more than its own helmet");
+        Assert.That(helmet.GetProperty("pieces").EnumerateArray().Select(p => p.GetProperty("name").GetString()), Does.Contain("Mark VII"));
+    }
+
+    [Test]
     public async Task APieceByIds_ExportsAGlb()
     {
         // WENDIGO's kit has no permutation name; it is only addressable by region and permutation id.

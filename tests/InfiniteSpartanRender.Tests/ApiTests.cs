@@ -32,6 +32,11 @@ public class ApiTests
                 await File.WriteAllTextAsync(outputPath, "warm", cancellationToken);
                 return;
             }
+            if (loadout.Output == "catalog")
+            {
+                await File.WriteAllTextAsync(outputPath, $"""{"name":"{{loadout.Core}}","regions":[{"kind":"REGION","key":"helmet","region":-5,"pieces":[{"permutation":7,"name":"Mk 7"},{"permutation":-9,"name":null}]}]}""", cancellationToken);
+                return;
+            }
             LastPath = outputPath;
             if (Gate is not null) await Gate.WaitAsync(cancellationToken);
             await Task.Delay(20, cancellationToken);
@@ -365,6 +370,97 @@ public class ApiTests
 
         Assert.That(_runner.Warmed.OrderBy(c => c), Is.EqualTo(new RenderOptions().Cores.OrderBy(c => c)));
         Assert.That(Directory.EnumerateFiles(_cache, "*warm*"), Is.Empty, "the marker files are removed");
+    }
+
+    private string Scratch()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "isr-data-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        return folder;
+    }
+
+    [Test]
+    public async Task TheCatalog_ListsWhatWarmedCoresCanWear_AndTheCoatingsAndVisors()
+    {
+        var data = Scratch();
+        var assets = Scratch();
+        Directory.CreateDirectory(Path.Combine(data, "stylelists"));
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "a.json"), """{"styles":{"-5":{},"12":{}}}""");
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "b.json"), """{"styles":{"12":{},"3":{}},"other":1}""");
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "c.json"), """{"nothing":1}""");
+        await File.WriteAllTextAsync(Path.Combine(assets, "all_visors.json"), """{"Zed":{},"Alpha":{}}""");
+        _settings["Render:WarmImports"] = "true";
+        _settings["Render:DataDirectory"] = data;
+        _settings["Render:EkurAssets"] = assets;
+        Start();
+        for (var i = 0; i < 100 && _runner.Warmed.Count < new RenderOptions().Cores.Length; i++) await Task.Delay(50);
+        JsonElement catalog = default;
+        for (var i = 0; i < 100; i++)
+        {
+            catalog = (await _client.GetFromJsonAsync<JsonElement>("/catalog"));
+            if (catalog.GetProperty("pendingCores").GetArrayLength() == 0) break;
+            await Task.Delay(50);
+        }
+
+        var core = catalog.GetProperty("cores").EnumerateArray().First(c => c.GetProperty("name").GetString() == "Mark VII");
+        var region = core.GetProperty("regions")[0];
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(catalog.GetProperty("pendingCores").GetArrayLength(), Is.Zero);
+            Assert.That(catalog.GetProperty("cores").GetArrayLength(), Is.EqualTo(new RenderOptions().Cores.Length));
+            Assert.That((region.GetProperty("kind").GetString(), region.GetProperty("key").GetString(), region.GetProperty("region").GetInt32()), Is.EqualTo(("REGION", "helmet", -5)));
+            Assert.That(region.GetProperty("pieces")[0].GetProperty("name").GetString(), Is.EqualTo("Mk 7"));
+            Assert.That(region.GetProperty("pieces")[1].GetProperty("name").ValueKind, Is.EqualTo(JsonValueKind.Null), "a piece with no name is reached by its ids");
+            Assert.That(catalog.GetProperty("coatings").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "-5", "12", "3" }));
+            Assert.That(catalog.GetProperty("visors").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "Alpha", "Zed" }));
+        }
+    }
+
+    [Test]
+    public async Task TheCatalog_BeforeAnyImport_ListsEveryCoreAsPending_AndNoCoatingsWithoutData()
+    {
+        _settings["Render:DataDirectory"] = Path.Combine(Path.GetTempPath(), "isr-missing-" + Guid.NewGuid().ToString("N"));
+        _settings["Render:EkurAssets"] = Path.Combine(Path.GetTempPath(), "isr-missing-" + Guid.NewGuid().ToString("N"));
+        Start();
+
+        var catalog = await _client.GetFromJsonAsync<JsonElement>("/catalog");
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(catalog.GetProperty("cores").GetArrayLength(), Is.Zero);
+            Assert.That(catalog.GetProperty("pendingCores").GetArrayLength(), Is.EqualTo(new RenderOptions().Cores.Length));
+            Assert.That(catalog.GetProperty("coatings").GetArrayLength(), Is.Zero);
+            Assert.That(catalog.GetProperty("visors").GetArrayLength(), Is.Zero);
+        }
+    }
+
+    [Test]
+    public async Task TheCatalog_TreatsABrokenCoreFileAsPending()
+    {
+        Start();
+        var path = _factory.Services.GetRequiredService<CatalogService>().PathFor("Mark VII", "");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, "{not json");
+
+        var catalog = await _client.GetFromJsonAsync<JsonElement>("/catalog");
+
+        Assert.That(catalog.GetProperty("pendingCores").EnumerateArray().Select(c => c.GetString()), Does.Contain("Mark VII"));
+    }
+
+    [Test]
+    public async Task AWarm_KeepsACatalogItAlreadyHas_InsteadOfMakingItAgain()
+    {
+        var cache = Path.Combine(Path.GetTempPath(), "isr-cache-" + Guid.NewGuid().ToString("N"));
+        _settings["Render:CacheDirectory"] = cache;
+        _settings["Render:WarmImports"] = "true";
+        var path = new CatalogService(Microsoft.Extensions.Options.Options.Create(new RenderOptions { CacheDirectory = cache })).PathFor("Mark VII", "");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, """{"name":"Mark VII","regions":[]}""");
+        Start();
+        for (var i = 0; i < 100 && _runner.Warmed.Count < new RenderOptions().Cores.Length; i++) await Task.Delay(50);
+        await Task.Delay(200);
+
+        Assert.That(_runner.Loadouts.Count(l => l.Output == "catalog" && l.Core == "Mark VII"), Is.Zero);
     }
 
     [Test]

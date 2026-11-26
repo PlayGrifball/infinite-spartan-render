@@ -99,33 +99,6 @@ if output == "warm":
     Path(out).write_text("warm")
     sys.exit(0)
 
-if output == "names":
-    # Diagnostic: do the imported objects carry the ids, and do their names end in the permutation's display name?
-    rp = json.loads(ext.read_text())
-    display = {}
-    for region in rp.values():
-        for pid, perm in (region.get("permutations") or {}).items():
-            display[str(pid)] = perm.get("name")
-    rows = []
-    for col in bpy.data.collections:
-        if not col.name.startswith(("[REGION]", "[KIT]")):
-            continue
-        for x in col.objects:
-            if x.type != "MESH":
-                continue
-            pid = x.get("permutation_name")
-            want = display.get(str(pid))
-            base = x.name.split(".")[0] if re.search(r"\.\d{3}$", x.name) else x.name
-            rows.append({
-                "collection": col.name, "object": x.name, "region": x.get("region_name"), "permutation": pid,
-                "display": want, "hashed": bool(HASHED.fullmatch(x.name)),
-                "nameMatches": bool(want) and base.endswith("_" + want),
-                "truncated": len(x.name) >= 63,
-            })
-    Path(out).write_text(json.dumps(rows))
-    sys.exit(0)
-
-
 def region_key(col):
     name = col.name.removeprefix("[REGION] ")
     return name.split("_", 1)[1] if "_" in name else name
@@ -139,6 +112,53 @@ def default_permutation(objs, core):
     real = [x for x in objs if not HASHED.fullmatch(x.name) and not PLACEHOLDER.search(x.name)] or objs
     named = next((x for x in real if x.name.split(".")[0].lower().endswith("_" + core.lower())), None)
     return named or real[0]
+
+
+def listing():
+    # Every mesh in the region and kit collections with its ids and the display name of its permutation.
+    rp = json.loads(ext.read_text())
+    display = {}
+    for region in rp.values():
+        for pid, perm in (region.get("permutations") or {}).items():
+            display[str(pid)] = perm.get("name")
+    rows = []
+    for col in bpy.data.collections:
+        if not col.name.startswith(("[REGION]", "[KIT]")):
+            continue
+        kind, _, rest = col.name[1:].partition("] ")
+        for x in col.objects:
+            if x.type != "MESH":
+                continue
+            pid = x.get("permutation_name")
+            want = display.get(str(pid))
+            base = x.name.split(".")[0] if re.search(r"\.\d{3}$", x.name) else x.name
+            rows.append({
+                "collection": col.name, "kind": kind, "key": rest.split("_", 1)[1] if "_" in rest else rest,
+                "object": x.name, "region": x.get("region_name"), "permutation": pid,
+                "display": want, "hashed": bool(HASHED.fullmatch(x.name)),
+                "nameMatches": bool(want) and base.endswith("_" + want),
+                "truncated": len(x.name) >= 63,
+            })
+    return rows
+
+
+if output == "names":
+    Path(out).write_text(json.dumps(listing()))
+    sys.exit(0)
+
+if output == "catalog":
+    # What this core can wear: per region (or kit region) the pieces, by the game's ids and, when it has one, a name.
+    regions = {}
+    for r in listing():
+        if r["region"] is None or r["permutation"] is None:
+            continue
+        g = regions.setdefault((r["kind"], r["key"]), {"kind": r["kind"], "key": r["key"], "region": int(r["region"]), "pieces": {}})
+        g["pieces"].setdefault(int(r["permutation"]), {"permutation": int(r["permutation"]), "name": r["display"]})
+    doc = {"core": core, "regions": [
+        {**g, "pieces": sorted(g["pieces"].values(), key=lambda p: (p["name"] is None, p["name"] or "", p["permutation"]))}
+        for g in sorted(regions.values(), key=lambda g: (g["kind"], g["key"]))]}
+    Path(out).write_text(json.dumps(doc))
+    sys.exit(0)
 
 
 def prop_id(obj, name):
