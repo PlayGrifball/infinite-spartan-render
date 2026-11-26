@@ -124,13 +124,69 @@ print("MATS", len(done), "missing", sorted(missing))
 if problems:
     sys.exit("Materials failed, not rendering a degraded Spartan: " + "; ".join(problems))
 
+def bake_to_plain_materials(size):
+    # Ekur's shader graph is not glTF-exportable: bake what it shows into plain textures on a Principled BSDF.
+    sc.render.engine = "CYCLES"
+    sc.cycles.device = "CPU"
+    sc.cycles.samples = 1
+    sc.cycles.use_denoising = False
+    passes = (("color", "DIFFUSE", "sRGB"), ("rough", "ROUGHNESS", "Non-Color"), ("normal", "NORMAL", "Non-Color"), ("emit", "EMIT", "sRGB"))
+    for obj in keep:
+        for x in bpy.data.objects:
+            x.select_set(False)
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        obj.data.uv_layers.active_index = 0
+        mats = [s.material for s in obj.material_slots if s.material]
+        images = {}
+        for key, bake_type, space in passes:
+            img = bpy.data.images.new(f"{obj.name}_{key}", size, size, alpha=False)
+            img.colorspace_settings.name = space
+            images[key] = img
+            temp = []
+            for m in mats:
+                node = m.node_tree.nodes.new("ShaderNodeTexImage")
+                node.image = img
+                temp.append((m, node))
+                m.node_tree.nodes.active = node
+            kwargs = {"pass_filter": {"COLOR"}} if bake_type == "DIFFUSE" else {}
+            bpy.ops.object.bake(type=bake_type, margin=8, margin_type="EXTEND", **kwargs)
+            for m, node in temp:
+                m.node_tree.nodes.remove(node)
+        plain = bpy.data.materials.new(obj.name)
+        plain.use_nodes = True
+        nt = plain.node_tree
+        nt.nodes.clear()
+        out_node = nt.nodes.new("ShaderNodeOutputMaterial")
+        bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
+        bsdf.inputs["Metallic"].default_value = 0.0
+        nt.links.new(bsdf.outputs["BSDF"], out_node.inputs["Surface"])
+        tex = {}
+        for key, img in images.items():
+            t = nt.nodes.new("ShaderNodeTexImage")
+            t.image = img
+            tex[key] = t
+        nt.links.new(tex["color"].outputs["Color"], bsdf.inputs["Base Color"])
+        split = nt.nodes.new("ShaderNodeSeparateColor")
+        nt.links.new(tex["rough"].outputs["Color"], split.inputs["Color"])
+        nt.links.new(split.outputs["Green"], bsdf.inputs["Roughness"])
+        nmap = nt.nodes.new("ShaderNodeNormalMap")
+        nmap.uv_map = obj.data.uv_layers[0].name
+        nt.links.new(tex["normal"].outputs["Color"], nmap.inputs["Color"])
+        nt.links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
+        nt.links.new(tex["emit"].outputs["Color"], bsdf.inputs["Emission Color"])
+        bsdf.inputs["Emission Strength"].default_value = 1.0
+        obj.data.materials.clear()
+        obj.data.materials.append(plain)
+        obj.data.polygons.foreach_set("material_index", [0] * len(obj.data.polygons))
+        print("BAKED", obj.name, flush=True)
+
+
 if output == "glb":
-    if not full:
-        for img in bpy.data.images:
-            if img.size[0] > 1024 or img.size[1] > 1024:
-                factor = 1024 / max(img.size[0], img.size[1])
-                img.scale(max(1, round(img.size[0] * factor)), max(1, round(img.size[1] * factor)))
-    bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", use_selection=True, export_apply=True)
+    bake_to_plain_materials(2048 if full else 1024)
+    for x in keep:
+        x.select_set(True)
+    bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", use_selection=True, export_apply=True, export_image_format="JPEG", export_jpeg_quality=85)
     sys.exit(0)
 
 pts = [x.matrix_world @ mathutils.Vector(c) for x in keep for c in x.bound_box]
