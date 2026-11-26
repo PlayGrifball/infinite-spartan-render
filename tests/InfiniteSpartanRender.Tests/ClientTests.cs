@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using System.Text;
 using System.Text.Json;
 using PlayGrifball.InfiniteSpartanRender.Client;
+using ClientSetRequest = PlayGrifball.InfiniteSpartanRender.Client.SpartanSetRequest;
 
 namespace InfiniteSpartanRender.Tests;
 
@@ -141,7 +142,7 @@ public class ClientTests
         });
         var client = ClientFor(stub);
 
-        var set = await client.WaitAsync(await client.SubmitSetAsync(new SpartanSetRequest { Core = "Mark VII", Stance = 39388885 }), TimeSpan.FromMilliseconds(1));
+        var set = await client.WaitAsync(await client.SubmitSetAsync(new ClientSetRequest { Core = "Mark VII", Stance = 39388885 }), TimeSpan.FromMilliseconds(1));
 
         Assert.That(set.IsDone, Is.True);
         Assert.That(await client.GetFileAsync(set.Items[0]), Is.EqualTo(new byte[] { 9 }));
