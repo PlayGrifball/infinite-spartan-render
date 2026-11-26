@@ -257,12 +257,12 @@ public class ApiTests
         var script = Path.Combine(Path.GetTempPath(), "isr-script-" + Guid.NewGuid().ToString("N") + ".py");
         try
         {
-            File.WriteAllText(script, "print(1)");
+            await File.WriteAllTextAsync(script, "print(1)");
             _settings["Render:ScriptPath"] = script;
             Start();
             var before = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
 
-            File.WriteAllText(script, "print(2)");
+            await File.WriteAllTextAsync(script, "print(2)");
             Start();
             var after = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
 
