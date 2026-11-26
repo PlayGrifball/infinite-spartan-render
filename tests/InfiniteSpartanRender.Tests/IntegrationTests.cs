@@ -83,7 +83,7 @@ public class IntegrationTests
         WriteTimings();
         // Three tests render Mark VII: the first imports it (minutes), the others open the saved import.
         double[] imports;
-        lock (_phases) imports = _phases.Where(p => p.Phase == "import" && !p.Test.Contains("Yoroi") && !p.Test.Contains("WithoutABodyType") && !p.Test.Contains("Warm")).Select(p => p.Seconds).ToArray();
+        lock (_phases) imports = _phases.Where(p => p.Phase == "import" && !p.Test.Contains("Yoroi") && !p.Test.Contains("WithoutABodyType") && !p.Test.Contains("Warm") && !p.Test.Contains("Visor")).Select(p => p.Seconds).ToArray();
         if (imports.Length == 3) Assert.That(imports.Count(s => s < 60), Is.GreaterThanOrEqualTo(2), "a core's import is reused: " + string.Join(", ", imports));
         if (_work.Length > 0 && Directory.Exists(_work)) Directory.Delete(_work, recursive: true);
     }
@@ -140,6 +140,19 @@ public class IntegrationTests
         var bytes = await File.ReadAllBytesAsync(output);
         Assert.That(System.Text.Encoding.ASCII.GetString(bytes, 0, 4), Is.EqualTo("glTF"));
         Assert.That(bytes.Length, Is.GreaterThan(100_000));
+    }
+
+    [Test]
+    public async Task AVisor_ChangesTheRenderedHelmet()
+    {
+        var plain = Path.Combine(_work, "visor-default.png");
+        var visored = Path.Combine(_work, "visor-faze.png");
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "png", Framing = "head" }, plain, CancellationToken.None);
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "png", Framing = "head", Visor = "2024 FaZE Launch" }, visored, CancellationToken.None);
+
+        Keep(visored);
+        Assert.That(await File.ReadAllBytesAsync(visored), Is.Not.EqualTo(await File.ReadAllBytesAsync(plain)), "the visor is in the picture");
     }
 
     [Test]

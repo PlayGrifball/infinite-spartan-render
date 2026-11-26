@@ -34,6 +34,7 @@ loadout = json.loads(Path(loadout_path).read_text())
 core = loadout["Core"]
 armor = loadout.get("Armor") or {}
 coating = loadout.get("Coating") or ""
+visor = loadout.get("Visor") or ""
 parts = {int(p["Region"]): int(p["Permutation"]) for p in (loadout.get("Parts") or [])}
 output = loadout.get("Output", "png")
 full = loadout.get("Size") == "full"
@@ -227,6 +228,13 @@ mp.selected_only = True
 if coating:
     mp.use_default_coating = False
     mp.coating_id = coating
+if visor:
+    # Ekur lists visors from a file in its extension folder (read-only here), so fill the list it caches from the same names
+    options = importlib.import_module(MOD + ".src.ui.material_options")
+    names = sorted(json.loads(Path(f"{EKUR_ASSETS}/all_visors.json").read_text()), key=options.natural_sort_key)
+    options.visor_cache = [(n, n, "") for n in names]
+    mp.override_visor = True
+    mp.visor = visor
 
 mo = importlib.import_module(MOD + ".src.operators.material_operator")
 ju = importlib.import_module(MOD + ".src.utils")
@@ -287,7 +295,7 @@ def bake_folder(size):
     if not cache:
         return None
     renderer = hashlib.sha256(Path(sys.argv[sys.argv.index("--python") + 1]).read_bytes()).hexdigest()
-    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, size], sort_keys=True)
+    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, visor, size], sort_keys=True)
     return Path(cache) / hashlib.sha256(ident.encode()).hexdigest()[:32]
 
 

@@ -18,6 +18,9 @@ public sealed record SpartanLoadout
     /// <summary>A coating id; null or empty is the default coating.</summary>
     public string? Coating { get; init; }
 
+    /// <summary>A visor title from the catalog's <c>visors</c>; null or empty is the core's default visor.</summary>
+    public string? Visor { get; init; }
+
     /// <summary><c>png</c> or <c>glb</c>.</summary>
     public string Output { get; init; } = "png";
 
@@ -45,6 +48,8 @@ public sealed record SpartanSetRequest
     public IDictionary<string, string> Armor { get; init; } = new Dictionary<string, string>();
     public IList<SpartanPart> Parts { get; init; } = new List<SpartanPart>();
     public string? Coating { get; init; }
+    /// <summary>A visor title from the catalog; null or empty is the core's default visor.</summary>
+    public string? Visor { get; init; }
 
     /// <summary>A StanceId from a player's action pose item (required by the API).</summary>
     public required int Stance { get; init; }
