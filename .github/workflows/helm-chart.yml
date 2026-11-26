@@ -255,8 +255,8 @@ jobs:
   # release whose tag is <chart>-<version> for an OCI chart. Never marked the repository's latest release. On a re-run
   # it updates the release's notes, and fails if the tag points at another commit.
   release:
-    needs: [publish]
-    if: needs.publish.outputs.version != ''
+    needs: [publish, packages]
+    if: always() && needs.publish.result == 'success' && needs.publish.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -276,14 +276,18 @@ jobs:
           IMAGE_REF: ${{ needs.publish.outputs.image }}
           IMAGE_DIGEST: ${{ needs.publish.outputs.image-digest }}
           IMAGE_COMMIT: ${{ needs.publish.outputs.image-commit }}
+          NUGET_PUBLISHED: ${{ needs.packages.result == 'success' && needs.packages.outputs.nuget }}
           IDENTITY: ^https://github\.com/${{ github.repository }}/\.github/workflows/helm-chart\.yml@refs/heads/main$
         run: |
           set -euo pipefail
           tag="infinite-spartan-render-$VERSION"
           git fetch --tags --force origin
+          package_flags=()
+          [ "$NUGET_PUBLISHED" = true ] && package_flags+=(--nuget)
           node .github/scripts/chart-release-notes.mjs --chart "$CHART" --name infinite-spartan-render --version "$VERSION" \
             --repository "$GITHUB_REPOSITORY" --chart-repo "$CHART_REPO" --digest "$DIGEST" --identity "$IDENTITY" \
-            --image "$IMAGE_REF" --image-digest "$IMAGE_DIGEST" --image-commit "$IMAGE_COMMIT" --image-identity "$IMAGE_IDENTITY" > notes.md
+            --image "$IMAGE_REF" --image-digest "$IMAGE_DIGEST" --image-commit "$IMAGE_COMMIT" --image-identity "$IMAGE_IDENTITY" \
+            "${package_flags[@]}" > notes.md
           if at=$(git rev-parse -q --verify "refs/tags/$tag^{commit}"); then
             test "$at" = "$GITHUB_SHA" || { echo "::error::$tag already points at $at, not $GITHUB_SHA"; exit 1; }
           fi
