@@ -14,6 +14,8 @@ public class ApiTests
     {
         public int Calls;
         public bool Fail;
+        public bool FailWarm;
+        public readonly System.Collections.Concurrent.ConcurrentBag<string> Warmed = new();
 
         public Task? Gate;
         public string? LastPath;
@@ -23,6 +25,13 @@ public class ApiTests
         {
             Interlocked.Increment(ref Calls);
             Loadouts.Add(loadout);
+            if (loadout.Output == "warm")
+            {
+                if (FailWarm) throw new InvalidOperationException("warm broke");
+                Warmed.Add(loadout.Core);
+                await File.WriteAllTextAsync(outputPath, "warm", cancellationToken);
+                return;
+            }
             LastPath = outputPath;
             if (Gate is not null) await Gate.WaitAsync(cancellationToken);
             await Task.Delay(20, cancellationToken);
@@ -33,6 +42,7 @@ public class ApiTests
 
     private string _cache = "";
     private readonly Dictionary<string, string> _settings = new();
+    private bool _failWarm;
     private FakeRunner _runner = new();
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _client = null!;
@@ -41,6 +51,7 @@ public class ApiTests
     public void SetUp()
     {
         _settings.Clear();
+        _failWarm = false;
         Start();
     }
 
@@ -49,10 +60,11 @@ public class ApiTests
         _client?.Dispose();
         _factory?.Dispose();
         _cache = Path.Combine(Path.GetTempPath(), "isr-" + Guid.NewGuid().ToString("N"));
-        _runner = new FakeRunner();
+        _runner = new FakeRunner { FailWarm = _failWarm };
         _factory = new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("Render:CacheDirectory", _cache);
+            b.UseSetting("Render:WarmImports", "false");
             foreach (var (k, v) in _settings) b.UseSetting(k, v);
             b.ConfigureServices(s => s.Replace(ServiceDescriptor.Singleton<IBlenderRunner>(_runner)));
         });
@@ -341,6 +353,31 @@ public class ApiTests
             codes.Add((await _client.PostAsJsonAsync("/spartans", Body(coating: i.ToString()))).StatusCode);
 
         Assert.That(codes[2], Is.EqualTo(HttpStatusCode.TooManyRequests));
+    }
+
+    [Test]
+    public async Task WhenEnabled_TheServiceImportsEveryCore_BeforeAnyoneAsks()
+    {
+        _settings["Render:WarmImports"] = "true";
+        Start();
+
+        for (var i = 0; i < 100 && _runner.Warmed.Count < new RenderOptions().Cores.Length; i++) await Task.Delay(50);
+
+        Assert.That(_runner.Warmed.OrderBy(c => c), Is.EqualTo(new RenderOptions().Cores.OrderBy(c => c)));
+        Assert.That(Directory.EnumerateFiles(_cache, "*warm*"), Is.Empty, "the marker files are removed");
+    }
+
+    [Test]
+    public async Task AFailedWarm_DoesNotStopTheServiceRendering()
+    {
+        _settings["Render:WarmImports"] = "true";
+        _failWarm = true;
+        Start();
+
+        var response = await _client.PostAsJsonAsync("/spartans", Body());
+        var id = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+
+        Assert.That(await StateOf(id, "done"), Is.EqualTo("done"));
     }
 
     [Test]

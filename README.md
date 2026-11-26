@@ -55,7 +55,7 @@ A PNG has a transparent background (RGBA); the scene is still lit by the grey wo
 
 `BlenderPath`, `ScriptPath`, `CacheDirectory` (`/cache`), `WorkDirectory` (`/tmp/render`), `MaxConcurrentJobs` (1; a
 render needs several GB of RAM), `MaxQueued` (20; more gets 503), `SubmitsPerMinute` (60 per address; more gets 429),
-`CacheDays` (30; older results are deleted), `TimeoutSeconds` (1800), `Cores`.
+`CacheDays` (30; older results are deleted), `TimeoutSeconds` (1800), `WarmImports` (true), `Cores`.
 
 Jobs are held in memory: after a restart an unfinished job answers 404 and the client posts the loadout again (finished
 results are still in the cache). A render that cannot load all its materials fails rather than being cached degraded.
@@ -81,7 +81,8 @@ Importing a core takes minutes and does not depend on the loadout or stance, so 
 `<cache>/imports/<core>-<key>.blend` (the key covers the core, Blender and the Ekur manifest) and later jobs for that
 core open it. A GLB's baked textures do not depend on the stance either, so they are kept per loadout in
 `<cache>/bakes/<key>/` (the key adds the loadout and the Blender script) and a GLB in another stance of the same armor
-loads them instead of baking again. A changed game data folder needs `imports/` and `bakes/` cleared; files unused for
+loads them instead of baking again. The service warms every core in `Cores` at startup (one at a time, in a job slot) and daily, so the first request
+for a core does not wait for its import (a core already saved is only touched, with no import or open); `WarmImports` (default true) turns that off. A changed game data folder needs `imports/` and `bakes/` cleared; files unused for
 `CacheDays` are swept.
 
 The stance is a Halo animation: a player's `actionPosePath` item (gateway `gamecms/item`) carries a `StanceId`, and

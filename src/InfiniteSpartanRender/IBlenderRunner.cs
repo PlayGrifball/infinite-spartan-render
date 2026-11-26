@@ -22,6 +22,8 @@ public sealed class RenderOptions
     public int SubmitsPerMinute { get; set; } = 60;
     public int CacheDays { get; set; } = 30;
     public int TimeoutSeconds { get; set; } = 1800;
+    // Import every core in the background at startup and daily, so no request waits for a first import.
+    public bool WarmImports { get; set; } = true;
     public string[] Cores { get; set; } = ["Mark VII", "Mark V [B]", "Yoroi", "Eaglestrike", "Rakshasa", "Chimera", "Mirage IIC", "HAZMAT", "Mark IV"];
 }
 

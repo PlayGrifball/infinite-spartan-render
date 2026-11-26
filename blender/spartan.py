@@ -53,13 +53,18 @@ def tool_version():
     return bpy.app.version_string + "\n" + (manifest.read_text() if manifest.exists() else "")
 
 
+def cached_import():
+    cache = os.environ.get("ISR_IMPORT_CACHE")
+    if not cache:
+        return None
+    key = hashlib.sha256("\n".join([core, tool_version()]).encode()).hexdigest()[:16]
+    return Path(cache) / f"{re.sub(r'[^a-z0-9]+', '-', core.lower()).strip('-')}-{key}.blend"
+
+
 def import_core():
     # Importing a core takes minutes and does not depend on the loadout or the stance: keep the imported scene.
-    cache = os.environ.get("ISR_IMPORT_CACHE")
-    cached = None
-    if cache:
-        key = hashlib.sha256("\n".join([core, tool_version()]).encode()).hexdigest()[:16]
-        cached = Path(cache) / f"{re.sub(r'[^a-z0-9]+', '-', core.lower()).strip('-')}-{key}.blend"
+    cached = cached_import()
+    if cached:
         if cached.exists():
             bpy.ops.wm.open_mainfile(filepath=str(cached), load_ui=False)
             os.utime(cached)
@@ -78,9 +83,20 @@ def import_core():
         print("IMPORT saved", cached.name, flush=True)
 
 
+# A warm only makes sure the import is saved: when it is, touch it (so the sweep keeps it) and stop.
+if output == "warm":
+    saved = cached_import()
+    if saved and saved.exists():
+        os.utime(saved)
+        phase("import_cached")
+        Path(out).write_text("warm")
+        sys.exit(0)
 import_core()
 sc = bpy.context.scene
 phase("import")
+if output == "warm":
+    Path(out).write_text("warm")
+    sys.exit(0)
 
 
 def region_key(col):
