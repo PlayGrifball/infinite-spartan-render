@@ -133,6 +133,11 @@ stance_path = next(iter(sorted((Path(DATA) / "stances").glob(f"anim_{stance_id}_
 armature = next((o for o in bpy.data.objects if o.type == "ARMATURE"), None)
 if armature is None or stance_path is None:
     sys.exit(f"The armature or stance {stance_id} is missing from the data folder")
+# Ekur leaves the pauldrons' Armature modifier without an armature, so they would never follow the pose.
+for x in keep:
+    for m in x.modifiers:
+        if m.type == "ARMATURE" and m.object is None:
+            m.object = armature
 anim_data = importlib.import_module(MOD + ".src.model.importer.animation.anim_data")
 anim_import = importlib.import_module(MOD + ".src.model.importer.animation.importer")
 animation = anim_data.AnimationData()
