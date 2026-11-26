@@ -442,6 +442,45 @@ public class BlenderRunnerTests
         Assert.That(Directory.GetDirectories(Path.Combine(_dir, "work")), Is.Empty);
     }
 
+    [TestCase("ISR_PHASE bake 12.50", "bake", 12.5)]
+    [TestCase("ISR_PHASE import 0.01", "import", 0.01)]
+    public void APhaseLine_IsParsed(string line, string phase, double seconds)
+    {
+        Assert.That(PhaseTiming.TryParse(line, out var p, out var s), Is.True);
+        Assert.That((p, s), Is.EqualTo((phase, seconds)));
+    }
+
+    [TestCase("")]
+    [TestCase("MATS 4 missing []")]
+    [TestCase("ISR_PHASE bake")]
+    [TestCase("ISR_PHASE bake abc")]
+    [TestCase("ISR_PHASE bake -1")]
+    [TestCase("ISR_PHASE Bake-Helmet 1")]
+    [TestCase("ISR_PHASE bake 1 extra")]
+    public void ALineThatIsNotAPhase_IsIgnored(string line)
+    {
+        Assert.That(PhaseTiming.TryParse(line, out _, out _), Is.False);
+    }
+
+    [Test]
+    public async Task EachPhaseBlenderReports_IsRecordedByPhaseAndOutput_AndKeptOutOfTheErrorTail()
+    {
+        var seen = new List<(string Phase, string Output, double Seconds)>();
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (i, l) => { if (i.Meter.Name == RenderTelemetry.Name && i.Name == "spartan_render.phase_duration") l.EnableMeasurementEvents(i); };
+        listener.SetMeasurementEventCallback<double>((_, value, tags, _) =>
+        {
+            lock (seen) seen.Add((tags.ToArray().Single(t => t.Key == "phase").Value!.ToString()!, tags.ToArray().Single(t => t.Key == "output").Value!.ToString()!, value));
+        });
+        listener.Start();
+        var runner = RunnerFor("echo ISR_PHASE import 1.5; echo ISR_PHASE bake 7; echo not a phase; exit 4");
+
+        var e = Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunAsync(Mark7 with { Output = "glb" }, Path.Combine(_dir, "out.glb"), CancellationToken.None));
+
+        lock (seen) Assert.That(seen, Is.EquivalentTo(new[] { ("import", "glb", 1.5), ("bake", "glb", 7.0) }));
+        Assert.That(e!.Message, Does.Contain("not a phase").And.Not.Contain("ISR_PHASE"));
+    }
+
     [Test]
     public void ABlenderThatExitsNonZero_ThrowsWithItsOutput()
     {

@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import addon_utils
@@ -16,6 +17,16 @@ EKUR_ASSETS = "/opt/ekur/assets"
 DEFAULT_STANCE = -1258174396
 MOD = "bl_ext.user_default.ekur"
 HASHED = re.compile(r"-?\d+_-?\d+_-?\d+(\.\d+)?")
+
+_t0 = _last = time.monotonic()
+
+
+def phase(name):
+    global _last
+    now = time.monotonic()
+    print(f"ISR_PHASE {name} {now - _last:.2f}", flush=True)
+    _last = now
+
 
 loadout_path, out = sys.argv[sys.argv.index("--") + 1:][:2]
 loadout = json.loads(Path(loadout_path).read_text())
@@ -40,6 +51,7 @@ o.import_specific_core = True
 o.core = core
 o.use_purp_rig = False
 bpy.ops.ekur.importspartan()
+phase("import")
 
 
 def region_key(col):
@@ -126,6 +138,7 @@ for slot in mo.get_materials():
     except Exception as e:
         problems.append(f"material {n}: {e!r}"[:200])
 print("MATS", len(done), "missing", sorted(missing))
+phase("materials")
 if problems:
     sys.exit("Materials failed, not rendering a degraded Spartan: " + "; ".join(problems))
 
@@ -146,6 +159,7 @@ with open(stance_path, "rb") as fh:
 animation.frames, animation.total_frames = animation.frames[:1], 1
 anim_import.import_animation(armature, animation, "stance")
 sc.frame_set(1)
+phase("pose")
 
 
 def bake_to_plain_materials(size):
@@ -175,6 +189,7 @@ def bake_to_plain_materials(size):
                 m.node_tree.nodes.active = node
             kwargs = {"pass_filter": {"COLOR"}} if bake_type == "DIFFUSE" else {}
             bpy.ops.object.bake(type=bake_type, margin=8, margin_type="EXTEND", **kwargs)
+            phase("bake")
             for m, node in temp:
                 m.node_tree.nodes.remove(node)
         plain = bpy.data.materials.new(obj.name)
@@ -218,10 +233,12 @@ if output == "glb":
         for m in [m for m in x.modifiers if m.type == "ARMATURE"]:
             x.modifiers.remove(m)
         x.data = posed
+    phase("mesh")
     bake_to_plain_materials(2048 if full else 1024)
     for x in keep:
         x.select_set(True)
     bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", use_selection=True, export_apply=True, export_image_format="JPEG", export_jpeg_quality=85)
+    phase("export")
     sys.exit(0)
 
 depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -259,4 +276,6 @@ sc.render.resolution_y = (700 if framing == "head" else 1000) * scale
 sc.render.image_settings.file_format = "PNG"
 sc.render.use_file_extension = False
 sc.render.filepath = out
+phase("scene")
 bpy.ops.render.render(write_still=True)
+phase("render")

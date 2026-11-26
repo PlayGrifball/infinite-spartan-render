@@ -71,7 +71,7 @@ Licensed MIT; Ekur is GPL-3.0 and is fetched at image build time.
 
 - **Swagger**: `/swagger` (OpenAPI at `/swagger/v1/swagger.json`).
 - **Health**: `/health/live` runs no checks; `/health/ready` checks that Blender, the mounted data (`Render:DataDirectory`) and a writable cache are there.
-- **Telemetry**: metrics and traces go out over OTLP only, configured by the standard `OTEL_*` variables and on when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Metrics: `spartan_render.jobs` (by `outcome`: done, failed, cancelled, cached, rejected), `spartan_render.duration` (seconds), `spartan_render.queue_depth`; each render is one `render` span.
+- **Telemetry**: metrics and traces go out over OTLP only, configured by the standard `OTEL_*` variables and on when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Metrics: `spartan_render.jobs` (by `outcome`: done, failed, cancelled, cached, rejected), `spartan_render.duration` (seconds), `spartan_render.queue_depth`, `spartan_render.phase_duration` (seconds, by `phase`: import, materials, pose, mesh, bake, export, scene, render, and `output`; a bake is one sample per mesh and texture, so sum it); the same stages are events on the `render` span; each render is one `render` span.
 - **Client address**: behind a proxy, set `ForwardedHeaders:KnownIPNetworks` (or `KnownProxies`, `ForwardedForHeaderName`) so the submit rate limit counts real clients.
 - **Helm chart**: `charts/infinite-spartan-render` (one replica, Recreate, read-only root, the game data PVC mounted read-only at `/data`, a cache PVC, NetworkPolicy, Traefik IngressRoute, PrometheusRule). CI lints, unit-tests and schema-checks it.
 
