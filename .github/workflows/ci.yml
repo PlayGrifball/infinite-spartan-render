@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# A new push to a PR cancels the older run, so slow integration jobs do not pile up on the one in-cluster runner.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,3 +22,83 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet test InfiniteSpartanRender.slnx -c Release --collect:"XPlat Code Coverage"
+
+  # Real Blender and Ekur renders on the in-cluster runner, which mounts the same trimmed game data the service
+  # uses at /data (homelab arc-infinite-spartan-render). Never for pull requests from forks: the data is private.
+  integration:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: infinite-spartan-render-k8s
+    env:
+      ISR_INTEGRATION: "1"
+      ISR_ARTIFACTS: ${{ github.workspace }}/renders
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: dotnet test InfiniteSpartanRender.slnx -c Release --filter "TestCategory=Integration"
+      # Unzipped, so each opens in the browser; the renders-comment job links them on the PR.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && hashFiles('renders/mark-vii.png') != '' }}
+        with:
+          path: renders/mark-vii.png
+          archive: false
+          retention-days: 30
+          overwrite: true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && hashFiles('renders/yoroi.glb') != '' }}
+        with:
+          path: renders/yoroi.glb
+          archive: false
+          retention-days: 30
+          overwrite: true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && hashFiles('renders/mark-vii-stance.glb') != '' }}
+        with:
+          path: renders/mark-vii-stance.glb
+          archive: false
+          retention-days: 30
+          overwrite: true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && hashFiles('renders/mark-vii-head.png') != '' }}
+        with:
+          path: renders/mark-vii-head.png
+          archive: false
+          retention-days: 30
+          overwrite: true
+
+  # On a PR, one comment linking the renders, which each run updates in place.
+  renders-comment:
+    needs: integration
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Comment on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          artifacts="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --paginate --jq '.artifacts[] | select(.expired == false) | [.name, .id] | @tsv')"
+          links=""
+          while IFS=$'\t' read -r name id; do
+            case "$name" in
+              mark-vii.png) label='Mark VII (PNG)' ;;
+              yoroi.glb) label='Yoroi (GLB, download)' ;;
+              mark-vii-stance.glb) label='Mark VII in a stance (GLB, download)' ;;
+              mark-vii-head.png) label='Mark VII headshot in a stance (PNG)' ;;
+              *) continue ;;
+            esac
+            links+="- [$label]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts/$id)"$'\n'
+          done <<< "$artifacts"
+          [ -n "$links" ] || { echo "No renders were uploaded."; exit 0; }
+          marker="<!-- isr-renders -->"
+          body="$(printf '%s\n### Renders from the in-cluster runner (%s)\n\n%s\n' "$marker" "${SHA:0:7}" "$links")"
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            -q ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -f body="$body" > /dev/null
+          else
+            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "$body"
+          fi

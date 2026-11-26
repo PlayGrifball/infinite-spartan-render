@@ -21,7 +21,7 @@ public sealed class RenderOptions
     public int MaxQueued { get; set; } = 20;
     public int SubmitsPerMinute { get; set; } = 60;
     public int CacheDays { get; set; } = 30;
-    public int TimeoutSeconds { get; set; } = 900;
+    public int TimeoutSeconds { get; set; } = 1800;
     public string[] Cores { get; set; } = ["Mark VII", "Mark V [B]", "Yoroi", "Eaglestrike", "Rakshasa", "Chimera", "Mirage IIC", "HAZMAT", "Mark IV"];
 }
 
@@ -49,9 +49,16 @@ public sealed class BlenderRunner(IOptions<RenderOptions> options) : IBlenderRun
 
             using var process = Process.Start(start) ?? throw new InvalidOperationException("Blender did not start");
             var tail = new Queue<string>();
+            var span = Activity.Current;
             void Keep(string? line)
             {
                 if (line is null) return;
+                if (PhaseTiming.TryParse(line, out var phase, out var seconds))
+                {
+                    RenderTelemetry.PhaseDuration.Record(seconds, new KeyValuePair<string, object?>("phase", phase), new KeyValuePair<string, object?>("output", loadout.Output));
+                    span?.AddEvent(new ActivityEvent($"phase {phase}", tags: new ActivityTagsCollection { ["seconds"] = seconds }));
+                    return;
+                }
                 lock (tail) { tail.Enqueue(line); if (tail.Count > 30) tail.Dequeue(); }
             }
             process.OutputDataReceived += (_, e) => Keep(e.Data);

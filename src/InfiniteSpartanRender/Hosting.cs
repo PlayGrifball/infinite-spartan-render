@@ -11,6 +11,10 @@ public sealed record JobStatusResponse(string Id, string State, string? Error);
 
 public sealed record ErrorResponse(string Error);
 
+public sealed record SetItemResponse(string Name, string State, string Output, string Url);
+
+public sealed record SetResponse(string Id, string State, IReadOnlyList<SetItemResponse> Items);
+
 // Ready when a render could start: Blender is there, the Ekur data is mounted and the cache is writable.
 public sealed class ReadinessCheck(IOptions<RenderOptions> options) : IHealthCheck
 {

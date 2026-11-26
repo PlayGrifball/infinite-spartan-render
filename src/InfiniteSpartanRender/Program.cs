@@ -104,6 +104,37 @@ app.MapGet("/spartans/{id}/file", (string id, RenderService service) =>
     .Produces(StatusCodes.Status200OK, contentType: "image/png", additionalContentTypes: "model/gltf-binary")
     .Produces(StatusCodes.Status404NotFound);
 
+// One Spartan in a chosen stance and in the neutral one: a GLB, a body PNG and a headshot PNG of each.
+app.MapPost("/spartan-sets", (SpartanSetRequest request, RenderService service, IOptions<RenderOptions> options, HttpResponse response) =>
+{
+    if (request.Validate(options.Value.Cores) is { } problem) return Results.BadRequest(new ErrorResponse(problem));
+    if (service.SubmitSet(request) is not { } set)
+    {
+        response.Headers.RetryAfter = "60";
+        return Results.Json(new ErrorResponse("The render queue is full; try again later."), statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+    return Results.Accepted($"/spartan-sets/{set.Id}", ToResponse(set));
+})
+    .RequireRateLimiting("submit")
+    .WithName("SubmitSpartanSet")
+    .WithSummary("Ask for a Spartan in a chosen stance and in the neutral one: a GLB, a body PNG and a headshot PNG of each")
+    .Produces<SetResponse>(StatusCodes.Status202Accepted)
+    .Produces<ErrorResponse>(StatusCodes.Status400BadRequest)
+    .Produces(StatusCodes.Status429TooManyRequests)
+    .Produces<ErrorResponse>(StatusCodes.Status503ServiceUnavailable);
+
+app.MapGet("/spartan-sets/{id}", (string id, RenderService service) =>
+    IsId(id) && service.SetStatus(id) is { } set
+        ? Results.Ok(ToResponse(set))
+        : Results.NotFound(new ErrorResponse("No such set. Sets do not survive a restart: POST the request again.")))
+    .WithName("GetSpartanSet")
+    .WithSummary("The state of a set and the url of each of its six files")
+    .Produces<SetResponse>()
+    .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
+
+static SetResponse ToResponse(SpartanSetStatus set) => new(set.Id, set.State,
+    set.Items.Select(i => new SetItemResponse(i.Name, i.Status.State.ToString().ToLowerInvariant(), i.Output, $"/spartans/{i.Id}/file")).ToList());
+
 app.Run();
 
 public partial class Program;

@@ -17,10 +17,12 @@ public class ApiTests
 
         public Task? Gate;
         public string? LastPath;
+        public readonly System.Collections.Concurrent.ConcurrentBag<Loadout> Loadouts = new();
 
         public async Task RunAsync(Loadout loadout, string outputPath, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref Calls);
+            Loadouts.Add(loadout);
             LastPath = outputPath;
             if (Gate is not null) await Gate.WaitAsync(cancellationToken);
             await Task.Delay(20, cancellationToken);
@@ -36,7 +38,11 @@ public class ApiTests
     private HttpClient _client = null!;
 
     [SetUp]
-    public void SetUp() => Start();
+    public void SetUp()
+    {
+        _settings.Clear();
+        Start();
+    }
 
     private void Start()
     {
@@ -145,12 +151,122 @@ public class ApiTests
     [TestCase("""{"core":"Mark VII","output":"png","size":"huge"}""")]
     [TestCase("""{"core":"Mark VII","coating":"1; rm -rf /","output":"png","size":"small"}""")]
     [TestCase("""{"core":"Mark VII","coating":"12345678901234","output":"png","size":"small"}""")]
+    [TestCase("""{"core":"Mark VII","framing":"legs"}""")]
+    [TestCase("""{"core":"Mark VII","stance":"1; rm -rf /"}""")]
     public async Task AnInvalidLoadout_Gets400_WithoutRendering(string json)
     {
         var response = await _client.PostAsync("/spartans", new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
         Assert.That(_runner.Calls, Is.EqualTo(0));
+    }
+
+    private static object SetBody(int? stance = 39388885, string core = "Mark VII") =>
+        new { core, armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating = "1120495519", stance, size = "small" };
+
+    private async Task<JsonElement> SetWhenDone(string id)
+    {
+        for (var i = 0; i < 200; i++)
+        {
+            var doc = await _client.GetFromJsonAsync<JsonElement>($"/spartan-sets/{id}");
+            if (doc.GetProperty("state").GetString() is "done" or "failed") return doc;
+            await Task.Delay(20);
+        }
+        throw new TimeoutException("the set never finished");
+    }
+
+    [Test]
+    public async Task ASet_RendersTwoGlbsAndFourPngs_InTheStanceAndTheNeutralPose()
+    {
+        var response = await _client.PostAsJsonAsync("/spartan-sets", SetBody());
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        var id = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+
+        var set = await SetWhenDone(id);
+
+        Assert.That(set.GetProperty("state").GetString(), Is.EqualTo("done"));
+        var items = set.GetProperty("items").EnumerateArray().ToDictionary(i => i.GetProperty("name").GetString()!);
+        Assert.That(items.Keys, Is.EquivalentTo(new[] { "stance-glb", "neutral-glb", "stance-body", "stance-head", "neutral-body", "neutral-head" }));
+        Assert.That(items.Values.Select(i => i.GetProperty("url").GetString()).Distinct().Count(), Is.EqualTo(6));
+        foreach (var item in items.Values)
+            Assert.That((await _client.GetAsync(item.GetProperty("url").GetString())).StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(_runner.Calls, Is.EqualTo(6));
+    }
+
+    [Test]
+    public async Task ASetsNeutralItems_UseTheDefaultStance_AndItsOtherItemsTheChosenOne()
+    {
+        var id = (await (await _client.PostAsJsonAsync("/spartan-sets", SetBody(5))).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+        await SetWhenDone(id);
+
+        Assert.That(_runner.Loadouts.Count(l => l.Stance is null), Is.EqualTo(3));
+        Assert.That(_runner.Loadouts.Count(l => l.Stance == 5), Is.EqualTo(3));
+        Assert.That(_runner.Loadouts.Count(l => l.Output == "glb"), Is.EqualTo(2));
+        Assert.That(_runner.Loadouts.Count(l => l.Framing == "head"), Is.EqualTo(2));
+    }
+
+    [Test]
+    public async Task ASetPostedTwice_RendersOnce()
+    {
+        var id = (await (await _client.PostAsJsonAsync("/spartan-sets", SetBody())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+        await SetWhenDone(id);
+
+        var again = await (await _client.PostAsJsonAsync("/spartan-sets", SetBody())).Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.That(again.GetProperty("id").GetString(), Is.EqualTo(id));
+        Assert.That(again.GetProperty("state").GetString(), Is.EqualTo("done"));
+        Assert.That(_runner.Calls, Is.EqualTo(6));
+    }
+
+    [Test]
+    public async Task ASetWithAFailedRender_IsFailed()
+    {
+        _runner.Fail = true;
+        var id = (await (await _client.PostAsJsonAsync("/spartan-sets", SetBody())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+
+        Assert.That((await SetWhenDone(id)).GetProperty("state").GetString(), Is.EqualTo("failed"));
+    }
+
+    [TestCase("""{"core":"Mark VII"}""", Description = "no stance")]
+    [TestCase("""{"core":"Mark VII","stance":"1; rm -rf /"}""")]
+    [TestCase("""{"core":"Nope","stance":1}""")]
+    [TestCase("""{"core":"Mark VII","stance":1,"size":"huge"}""")]
+    public async Task AnInvalidSet_Gets400_WithoutRendering(string json)
+    {
+        var response = await _client.PostAsync("/spartan-sets", new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+        Assert.That(_runner.Calls, Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task AChangedRenderScript_ChangesTheId_SoOldFilesAreNotServed()
+    {
+        var script = Path.Combine(Path.GetTempPath(), "isr-script-" + Guid.NewGuid().ToString("N") + ".py");
+        try
+        {
+            File.WriteAllText(script, "print(1)");
+            _settings["Render:ScriptPath"] = script;
+            Start();
+            var before = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+
+            File.WriteAllText(script, "print(2)");
+            Start();
+            var after = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+
+            Assert.That(after, Is.Not.EqualTo(before));
+        }
+        finally
+        {
+            File.Delete(script);
+        }
+    }
+
+    [Test]
+    public async Task AnUnknownSet_Is404()
+    {
+        Assert.That((await _client.GetAsync("/spartan-sets/nope")).StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        Assert.That((await _client.GetAsync("/spartan-sets/" + new string('a', 32))).StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
     }
 
     [Test]
@@ -269,6 +385,24 @@ public class LoadoutTests
     {
         Assert.That(new Loadout { Core = "x", Coating = "1" }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Coating = "2" }.Id()));
     }
+
+    [Test]
+    public void ADifferentFraming_ChangesTheId()
+    {
+        Assert.That(new Loadout { Core = "x", Framing = "body" }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Framing = "head" }.Id()));
+    }
+
+    [Test]
+    public void ADifferentStance_ChangesTheId()
+    {
+        Assert.That(new Loadout { Core = "x", Stance = 1 }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Stance = 2 }.Id()));
+    }
+
+    [Test]
+    public void NoStance_IsTheDefaultStance()
+    {
+        Assert.That(new Loadout { Core = "x" }.Id(), Is.EqualTo(new Loadout { Core = "x", Stance = null }.Id()));
+    }
 }
 
 public class BlenderRunnerTests
@@ -306,6 +440,45 @@ public class BlenderRunnerTests
 
         Assert.That(File.Exists(output), Is.True);
         Assert.That(Directory.GetDirectories(Path.Combine(_dir, "work")), Is.Empty);
+    }
+
+    [TestCase("ISR_PHASE bake 12.50", "bake", 12.5)]
+    [TestCase("ISR_PHASE import 0.01", "import", 0.01)]
+    public void APhaseLine_IsParsed(string line, string phase, double seconds)
+    {
+        Assert.That(PhaseTiming.TryParse(line, out var p, out var s), Is.True);
+        Assert.That((p, s), Is.EqualTo((phase, seconds)));
+    }
+
+    [TestCase("")]
+    [TestCase("MATS 4 missing []")]
+    [TestCase("ISR_PHASE bake")]
+    [TestCase("ISR_PHASE bake abc")]
+    [TestCase("ISR_PHASE bake -1")]
+    [TestCase("ISR_PHASE Bake-Helmet 1")]
+    [TestCase("ISR_PHASE bake 1 extra")]
+    public void ALineThatIsNotAPhase_IsIgnored(string line)
+    {
+        Assert.That(PhaseTiming.TryParse(line, out _, out _), Is.False);
+    }
+
+    [Test]
+    public async Task EachPhaseBlenderReports_IsRecordedByPhaseAndOutput_AndKeptOutOfTheErrorTail()
+    {
+        var seen = new List<(string Phase, string Output, double Seconds)>();
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (i, l) => { if (i.Meter.Name == RenderTelemetry.Name && i.Name == "spartan_render.phase_duration") l.EnableMeasurementEvents(i); };
+        listener.SetMeasurementEventCallback<double>((_, value, tags, _) =>
+        {
+            lock (seen) seen.Add((tags.ToArray().Single(t => t.Key == "phase").Value!.ToString()!, tags.ToArray().Single(t => t.Key == "output").Value!.ToString()!, value));
+        });
+        listener.Start();
+        var runner = RunnerFor("echo ISR_PHASE import 1.5; echo ISR_PHASE bake 7; echo not a phase; exit 4");
+
+        var e = Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunAsync(Mark7 with { Output = "glb" }, Path.Combine(_dir, "out.glb"), CancellationToken.None));
+
+        lock (seen) Assert.That(seen, Is.EquivalentTo(new[] { ("import", "glb", 1.5), ("bake", "glb", 7.0) }));
+        Assert.That(e!.Message, Does.Contain("not a phase").And.Not.Contain("ISR_PHASE"));
     }
 
     [Test]

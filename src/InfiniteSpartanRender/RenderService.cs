@@ -24,6 +24,15 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
 
     public string CachedPath(string id, string output) => PathFor(id, output);
 
+    // The Blender script is the renderer: any change to it changes every id, so old files are never served.
+    private readonly Lazy<string> _renderer = new(() =>
+    {
+        var script = options.Value.ScriptPath;
+        return File.Exists(script) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(script)))[..12] : "";
+    });
+
+    private string IdOf(Loadout loadout) => loadout.Id(_renderer.Value);
+
     // Done when the file is in the cache (survives restarts); otherwise whatever this process knows about the job.
     // A job lost to a restart is unknown here: the client posts the loadout again.
     public JobStatus? Status(string id)
@@ -36,7 +45,7 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
     // Null when the queue is full.
     public JobStatus? Submit(Loadout loadout)
     {
-        var id = loadout.Id();
+        var id = IdOf(loadout);
         if (File.Exists(PathFor(id, loadout.Output)))
         {
             RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", "cached"));
@@ -50,6 +59,33 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         _jobs.TryRemove(id, out _);
         RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", "rejected"));
         return null;
+    }
+
+    private readonly ConcurrentDictionary<string, SpartanSetRequest> _sets = new();
+
+    // Null when the queue cannot take the whole set; what was queued still renders.
+    public SpartanSetStatus? SubmitSet(SpartanSetRequest request)
+    {
+        var id = request.Id(_renderer.Value);
+        foreach (var (_, loadout) in request.Items())
+            if (Submit(loadout) is null) return null;
+        _sets[id] = request;
+        return SetStatus(id);
+    }
+
+    public SpartanSetStatus? SetStatus(string id)
+    {
+        if (!_sets.TryGetValue(id, out var request)) return null;
+        var items = request.Items()
+            .Select(i => (i.Name, i.Loadout, Id: IdOf(i.Loadout)))
+            .Select(i => new SpartanSetItem(i.Name, i.Id, i.Loadout.Output,
+                Status(i.Id) ?? new JobStatus(i.Id, JobState.Failed, FailureMessage, DateTimeOffset.UtcNow)))
+            .ToList();
+        var state = items.Any(i => i.Status.State == JobState.Failed) ? JobState.Failed
+            : items.All(i => i.Status.State == JobState.Done) ? JobState.Done
+            : items.Any(i => i.Status.State != JobState.Queued) ? JobState.Running
+            : JobState.Queued;
+        return new SpartanSetStatus(id, state.ToString().ToLowerInvariant(), items);
     }
 
     // Drops cache files past CacheDays and finished job records past a day.

@@ -14,5 +14,8 @@ public static class RenderTelemetry
     // outcome: done, failed, cached (answered from the cache), rejected (queue full).
     public static readonly Counter<long> Jobs = Meter.CreateCounter<long>("spartan_render.jobs", description: "Render requests by outcome");
 
+    // phase: import, materials, pose, mesh, bake, export, scene, render (a bake is recorded once per mesh and texture).
+    public static readonly Histogram<double> PhaseDuration = Meter.CreateHistogram<double>("spartan_render.phase_duration", unit: "s", description: "Time one stage of a render took, by phase and output");
+
     public static readonly Histogram<double> Duration = Meter.CreateHistogram<double>("spartan_render.duration", unit: "s", description: "Time a render took, by outcome");
 }
