@@ -670,11 +670,18 @@ public class LoadoutTests
         Assert.That(set.Items().Select(i => i.Loadout.Parts), Has.All.EqualTo(new List<PartId> { new(1, 2) }));
     }
 
+    private static readonly string[] OnlyX = { "x" };
+    private static readonly string[] JustAlpha = { "Alpha" };
+    private static readonly string[] JustBeta = { "Beta" };
+
     [Test]
     public void ADifferentVisor_ChangesTheId()
     {
-        Assert.That(new Loadout { Core = "x", Visor = "A" }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Visor = "B" }.Id()));
-        Assert.That(new Loadout { Core = "x", Visor = "" }.Id(), Is.EqualTo(new Loadout { Core = "x" }.Id()), "no visor and an empty one are the same loadout");
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(new Loadout { Core = "x", Visor = "A" }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Visor = "B" }.Id()));
+            Assert.That(new Loadout { Core = "x", Visor = "" }.Id(), Is.EqualTo(new Loadout { Core = "x" }.Id()), "no visor and an empty one are the same loadout");
+        }
     }
 
     [Test]
@@ -684,9 +691,9 @@ public class LoadoutTests
 
         using (Assert.EnterMultipleScope())
         {
-            Assert.That(loadout.Validate(new[] { "x" }, new[] { "Alpha" }), Does.Contain("visor must be a title from the catalog"));
-            Assert.That((loadout with { Visor = "Alpha" }).Validate(new[] { "x" }, new[] { "Alpha" }), Is.Null);
-            Assert.That((loadout with { Visor = null }).Validate(new[] { "x" }, new[] { "Alpha" }), Is.Null, "no visor is the core's default");
+            Assert.That(loadout.Validate(OnlyX, JustAlpha), Does.Contain("visor must be a title from the catalog"));
+            Assert.That((loadout with { Visor = "Alpha" }).Validate(OnlyX, JustAlpha), Is.Null);
+            Assert.That((loadout with { Visor = null }).Validate(OnlyX, JustAlpha), Is.Null, "no visor is the core's default");
         }
     }
 
@@ -698,8 +705,8 @@ public class LoadoutTests
         using (Assert.EnterMultipleScope())
         {
             Assert.That(set.Items().Select(i => i.Loadout.Visor), Has.All.EqualTo("Alpha"));
-            Assert.That(set.Validate(new[] { "x" }, new[] { "Alpha" }), Is.Null);
-            Assert.That(set.Validate(new[] { "x" }, new[] { "Beta" }), Does.Contain("visor"));
+            Assert.That(set.Validate(OnlyX, JustAlpha), Is.Null);
+            Assert.That(set.Validate(OnlyX, JustBeta), Does.Contain("visor"));
             Assert.That(set.Id(), Is.Not.EqualTo((set with { Visor = "Beta" }).Id()));
         }
     }

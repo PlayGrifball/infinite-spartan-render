@@ -48,6 +48,7 @@ public sealed record SpartanSetRequest
     public IDictionary<string, string> Armor { get; init; } = new Dictionary<string, string>();
     public IList<SpartanPart> Parts { get; init; } = new List<SpartanPart>();
     public string? Coating { get; init; }
+    /// <summary>A visor title from the catalog; null or empty is the core's default visor.</summary>
     public string? Visor { get; init; }
 
     /// <summary>A StanceId from a player's action pose item (required by the API).</summary>

@@ -33,6 +33,17 @@ public sealed record Loadout
     {
         if (string.IsNullOrWhiteSpace(Core) || Core.Length > 64) return "core is required (at most 64 characters)";
         if (!cores.Contains(Core)) return $"core must be one of: {string.Join(", ", cores)}";
+        if (PiecesProblem() is { } pieces) return pieces;
+        if (!string.IsNullOrEmpty(Coating) && !CoatingId.IsMatch(Coating)) return "coating must be a numeric coating id";
+        if (!string.IsNullOrEmpty(Visor) && visors is not null && !visors.Contains(Visor)) return "visor must be a title from the catalog";
+        if (Output is not ("png" or "glb")) return "output must be png or glb";
+        if (Size is not ("small" or "full")) return "size must be small or full";
+        if (Framing is not ("body" or "head")) return "framing must be body or head";
+        return null;
+    }
+
+    private string? PiecesProblem()
+    {
         if (Armor is null) return "armor must be an object";
         if (Armor.Count > 64) return "armor has at most 64 entries";
         foreach (var (region, permutation) in Armor)
@@ -44,11 +55,6 @@ public sealed record Loadout
         if (Parts.Count > 64) return "parts has at most 64 entries";
         if (Parts.Any(p => p is null)) return "parts entries must be objects with region and permutation";
         if (Parts.Select(p => p.Region).Distinct().Count() != Parts.Count) return "parts has one entry per region";
-        if (!string.IsNullOrEmpty(Coating) && !CoatingId.IsMatch(Coating)) return "coating must be a numeric coating id";
-        if (!string.IsNullOrEmpty(Visor) && visors is not null && !visors.Contains(Visor)) return "visor must be a title from the catalog";
-        if (Output is not ("png" or "glb")) return "output must be png or glb";
-        if (Size is not ("small" or "full")) return "size must be small or full";
-        if (Framing is not ("body" or "head")) return "framing must be body or head";
         return null;
     }
 
