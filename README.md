@@ -41,7 +41,7 @@ The six items are `stance-glb`, `stance-body`, `stance-head`, `neutral-glb`, `ne
 `url` is a `/spartans/{id}/file`. They are ordinary jobs (the same cache, queue and limits), so a set whose pieces were
 rendered before costs nothing, and a GLB takes minutes. Sets, like jobs, do not survive a restart: post again.
 
-The id is a hash of the loadout, so asking again returns the cached file. A region left out of `armor` gets the core's
+The id is a hash of the loadout and of the Blender script, so asking again returns the cached file, and a changed script never serves files an older one made. A region left out of `armor` gets the core's
 default piece; `coating` left out gets the default coating.
 
 | size  | png                    | glb                       |

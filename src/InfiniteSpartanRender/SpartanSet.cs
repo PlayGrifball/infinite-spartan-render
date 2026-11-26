@@ -36,7 +36,7 @@ public sealed record SpartanSetRequest
         return Items()[0].Loadout.Validate(cores);
     }
 
-    public string Id() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(',', Items().Select(i => i.Loadout.Id())))))[..32].ToLowerInvariant();
+    public string Id(string renderer = "") => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(',', Items().Select(i => i.Loadout.Id(renderer))))))[..32].ToLowerInvariant();
 }
 
 public sealed record SpartanSetItem(string Name, string Id, string Output, JobStatus Status);

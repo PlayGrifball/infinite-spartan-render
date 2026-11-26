@@ -240,6 +240,29 @@ public class ApiTests
     }
 
     [Test]
+    public async Task AChangedRenderScript_ChangesTheId_SoOldFilesAreNotServed()
+    {
+        var script = Path.Combine(Path.GetTempPath(), "isr-script-" + Guid.NewGuid().ToString("N") + ".py");
+        try
+        {
+            File.WriteAllText(script, "print(1)");
+            _settings["Render:ScriptPath"] = script;
+            Start();
+            var before = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+
+            File.WriteAllText(script, "print(2)");
+            Start();
+            var after = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+
+            Assert.That(after, Is.Not.EqualTo(before));
+        }
+        finally
+        {
+            File.Delete(script);
+        }
+    }
+
+    [Test]
     public async Task AnUnknownSet_Is404()
     {
         Assert.That((await _client.GetAsync("/spartan-sets/nope")).StatusCode, Is.EqualTo(HttpStatusCode.NotFound));

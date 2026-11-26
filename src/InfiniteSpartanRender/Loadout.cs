@@ -40,10 +40,12 @@ public sealed record Loadout
     }
 
     // The same loadout always maps to the same id, whatever order the armor was sent in.
-    public string Id()
+    // `renderer` names the renderer that made the file, so a changed renderer never serves files an older one made.
+    public string Id(string renderer = "")
     {
         var canonical = JsonSerializer.Serialize(new
         {
+            renderer,
             core = Core,
             armor = (Armor ?? new()).OrderBy(a => a.Key, StringComparer.Ordinal).Select(a => new[] { a.Key, a.Value }),
             coating = string.IsNullOrEmpty(Coating) ? "" : Coating,
