@@ -39,7 +39,6 @@ public class IntegrationTests
     public void StartTimingTest()
     {
         _current = TestContext.CurrentContext.Test.Name;
-        if (_listener is not null) return;
         _listener = new System.Diagnostics.Metrics.MeterListener();
         _listener.InstrumentPublished = (i, l) => { if (i.Meter.Name == RenderTelemetry.Name && i.Name == "spartan_render.phase_duration") l.EnableMeasurementEvents(i); };
         _listener.SetMeasurementEventCallback<double>((_, value, tags, _) =>
@@ -50,10 +49,16 @@ public class IntegrationTests
         _listener.Start();
     }
 
+    [TearDown]
+    public void StopTimingTest()
+    {
+        _listener?.Dispose();
+        _listener = null;
+    }
+
     // One table of where each render's time went, in the job summary and next to the renders.
     private void WriteTimings()
     {
-        _listener?.Dispose();
         var lines = new List<string> { "### Render phases", "", "| test | phase | samples | seconds |", "|---|---|---|---|" };
         lock (_phases)
         {
