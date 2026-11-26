@@ -1,0 +1,90 @@
+name: SonarCloud
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: true
+  SONAR_SCANNER_VERSION: '12.1.0'
+  SONAR_ORGANIZATION: playgrifball
+  SONAR_PROJECT_KEY: PlayGrifball_infinite-spartan-render
+
+jobs:
+  analysis:
+    name: Analysis
+    # A fork PR gets no SONAR_TOKEN
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: Sonar uses blame to tell new code from old
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: global.json
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.sonar/cache
+          key: sonar-${{ runner.os }}-${{ env.SONAR_SCANNER_VERSION }}
+          restore-keys: sonar-${{ runner.os }}-
+
+      - name: Install scanner
+        run: dotnet tool install --global dotnet-sonarscanner --version "$SONAR_SCANNER_VERSION"
+
+      # The Python script is analysed too (scanAll); the integration tests need Blender and skip here.
+      - name: Begin analysis
+        run: >
+          dotnet sonarscanner begin
+          /k:"$SONAR_PROJECT_KEY"
+          /o:"$SONAR_ORGANIZATION"
+          /d:sonar.token="$SONAR_TOKEN"
+          /d:sonar.host.url=https://sonarcloud.io
+          /d:sonar.scanner.scanAll=true
+          /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml"
+
+      - name: Build
+        run: dotnet build InfiniteSpartanRender.slnx --configuration Release
+
+      # Coverage even when a test fails: ci.yml is what gates on the results
+      - name: Test
+        continue-on-error: true
+        run: >
+          dotnet test InfiniteSpartanRender.slnx
+          --no-build
+          --configuration Release
+          --results-directory TestResults/
+          --collect:"XPlat Code Coverage"
+          --settings coverlet.runsettings
+          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+      - name: End analysis
+        run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+
+      # The quality gate is SonarCloud's; this holds a PR to zero issues and hotspots without it.
+      - name: No SonarCloud issues
+        if: github.event_name == 'pull_request'
+        env:
+          PR: ${{ github.event.pull_request.number }}
+        run: .github/scripts/sonar-pr-issues.sh
