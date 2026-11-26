@@ -12,10 +12,10 @@ name: Helm chart
 
 on:
   pull_request:
-    paths: ["charts/**", "src/**", "blender/**", "Dockerfile", ".dockerignore", "global.json", "InfiniteSpartanRender.slnx", ".github/workflows/image.yml", ".github/workflows/helm-chart.yml", ".github/scripts/**"]
+    paths: ["charts/**", "src/**", "blender/**", "Dockerfile", ".dockerignore", "global.json", "InfiniteSpartanRender.slnx", ".github/workflows/image.yml", ".github/workflows/helm-chart.yml", ".github/workflows/publish.yml", ".github/scripts/**"]
   push:
     branches: [main]
-    paths: ["charts/**", "src/**", "blender/**", "Dockerfile", ".dockerignore", "global.json", "InfiniteSpartanRender.slnx", ".github/workflows/image.yml", ".github/workflows/helm-chart.yml", ".github/scripts/**"]
+    paths: ["charts/**", "src/**", "blender/**", "Dockerfile", ".dockerignore", "global.json", "InfiniteSpartanRender.slnx", ".github/workflows/image.yml", ".github/workflows/helm-chart.yml", ".github/workflows/publish.yml", ".github/scripts/**"]
   workflow_dispatch:
 
 permissions:
@@ -293,6 +293,21 @@ jobs:
             gh release create "$tag" --target "$GITHUB_SHA" --title "infinite-spartan-render $VERSION" --notes-file notes.md --latest=false
           fi
           echo "Released $tag: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$tag" >> "$GITHUB_STEP_SUMMARY"
+
+  # The release version is also the client package version; published only when the client changed since the last release.
+  # A registry outage fails this job (re-run it) without holding back the deploy.
+  packages:
+    needs: publish
+    if: needs.publish.outputs.version != ''
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      version: ${{ needs.publish.outputs.version }}
+      only_if_changed: true
+    secrets: inherit
 
   # One deployment lane. The synthetic commit keeps the chart source and this release's exact image digest together;
   # the homelab's Argo CD Application follows deploy/current.
