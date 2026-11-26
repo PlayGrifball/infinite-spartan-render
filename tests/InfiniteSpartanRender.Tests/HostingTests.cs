@@ -63,7 +63,7 @@ public class HostingTests
     {
         var blender = Path.Combine(_dir, "blender");
         Directory.CreateDirectory(_dir);
-        File.WriteAllText(blender, "");
+        await File.WriteAllTextAsync(blender, "");
         using var factory = Factory(blender, withData: false);
         var response = await factory.CreateClient().GetAsync("/health/ready");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.ServiceUnavailable));
@@ -74,7 +74,7 @@ public class HostingTests
     {
         var blender = Path.Combine(_dir, "blender");
         Directory.CreateDirectory(_dir);
-        File.WriteAllText(blender, "");
+        await File.WriteAllTextAsync(blender, "");
         using var factory = Factory(blender, withData: true);
         var response = await factory.CreateClient().GetAsync("/health/ready");
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.OK));

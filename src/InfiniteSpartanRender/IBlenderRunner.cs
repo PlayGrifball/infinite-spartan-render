@@ -82,8 +82,6 @@ public sealed class BlenderRunner(IOptions<RenderOptions> options) : IBlenderRun
                 if (cancellationToken.IsCancellationRequested) throw;
                 throw new TimeoutException($"Blender did not finish in {o.TimeoutSeconds} seconds");
             }
-            // The redirected streams are read asynchronously: wait for the last lines before reporting them.
-            process.WaitForExit();
 
             if (process.ExitCode != 0 || !File.Exists(outputPath))
             {

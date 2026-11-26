@@ -18,23 +18,23 @@ public sealed record SetResponse(string Id, string State, IReadOnlyList<SetItemR
 // Ready when a render could start: Blender is there, the Ekur data is mounted and the cache is writable.
 public sealed class ReadinessCheck(IOptions<RenderOptions> options) : IHealthCheck
 {
-    public Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
+    public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken cancellationToken = default)
     {
         var o = options.Value;
-        if (!File.Exists(o.BlenderPath)) return Task.FromResult(HealthCheckResult.Unhealthy("blender missing"));
-        if (!File.Exists(Path.Combine(o.DataDirectory, "customization_globals.json"))) return Task.FromResult(HealthCheckResult.Unhealthy("data missing"));
+        if (!File.Exists(o.BlenderPath)) return HealthCheckResult.Unhealthy("blender missing");
+        if (!File.Exists(Path.Combine(o.DataDirectory, "customization_globals.json"))) return HealthCheckResult.Unhealthy("data missing");
         try
         {
             Directory.CreateDirectory(o.CacheDirectory);
             var probe = Path.Combine(o.CacheDirectory, ".ready");
-            File.WriteAllText(probe, "");
+            await File.WriteAllTextAsync(probe, "", cancellationToken);
             File.Delete(probe);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            return Task.FromResult(HealthCheckResult.Unhealthy("cache not writable"));
+            return HealthCheckResult.Unhealthy("cache not writable");
         }
-        return Task.FromResult(HealthCheckResult.Healthy());
+        return HealthCheckResult.Healthy();
     }
 }
 
