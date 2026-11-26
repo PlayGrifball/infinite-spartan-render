@@ -14,6 +14,10 @@ public sealed record Loadout
     public string? Coating { get; init; }
     public string Output { get; init; } = "png";
     public string Size { get; init; } = "small";
+    // body | head: the head frames the helmet only.
+    public string Framing { get; init; } = "body";
+    // A StanceId from a player's action pose item; empty means the default stance.
+    public int? Stance { get; init; }
 
     private static readonly Regex CoatingId = new(@"^-?\d{1,12}$", RegexOptions.Compiled);
 
@@ -31,6 +35,7 @@ public sealed record Loadout
         if (!string.IsNullOrEmpty(Coating) && !CoatingId.IsMatch(Coating)) return "coating must be a numeric coating id";
         if (Output is not ("png" or "glb")) return "output must be png or glb";
         if (Size is not ("small" or "full")) return "size must be small or full";
+        if (Framing is not ("body" or "head")) return "framing must be body or head";
         return null;
     }
 
@@ -44,6 +49,8 @@ public sealed record Loadout
             coating = string.IsNullOrEmpty(Coating) ? "" : Coating,
             output = Output,
             size = Size,
+            framing = Framing,
+            stance = Stance,
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..32].ToLowerInvariant();
     }

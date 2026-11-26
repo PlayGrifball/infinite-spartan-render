@@ -13,6 +13,7 @@ import mathutils
 
 DATA = os.environ.get("ISR_DATA", "/data")
 EKUR_ASSETS = "/opt/ekur/assets"
+DEFAULT_STANCE = -1258174396
 MOD = "bl_ext.user_default.ekur"
 HASHED = re.compile(r"-?\d+_-?\d+_-?\d+(\.\d+)?")
 
@@ -23,6 +24,10 @@ armor = loadout.get("Armor") or {}
 coating = loadout.get("Coating") or ""
 output = loadout.get("Output", "png")
 full = loadout.get("Size") == "full"
+stance_id = loadout.get("Stance")
+if stance_id is None:
+    stance_id = DEFAULT_STANCE
+framing = loadout.get("Framing", "body")
 
 addon_utils.enable(MOD, default_set=True)
 bpy.context.preferences.addons[MOD].preferences.data_folder = DATA
@@ -124,6 +129,20 @@ print("MATS", len(done), "missing", sorted(missing))
 if problems:
     sys.exit("Materials failed, not rendering a degraded Spartan: " + "; ".join(problems))
 
+stance_path = next(iter(sorted((Path(DATA) / "stances").glob(f"anim_{stance_id}_*.ekuranim"))), None)
+armature = next((o for o in bpy.data.objects if o.type == "ARMATURE"), None)
+if armature is None or stance_path is None:
+    sys.exit(f"The armature or stance {stance_id} is missing from the data folder")
+anim_data = importlib.import_module(MOD + ".src.model.importer.animation.anim_data")
+anim_import = importlib.import_module(MOD + ".src.model.importer.animation.importer")
+animation = anim_data.AnimationData()
+with open(stance_path, "rb") as fh:
+    animation.read(fh)
+animation.frames, animation.total_frames = animation.frames[:1], 1
+anim_import.import_animation(armature, animation, "stance")
+sc.frame_set(1)
+
+
 def bake_to_plain_materials(size):
     # Ekur's shader graph is not glTF-exportable: bake what it shows into plain textures on a Principled BSDF.
     sc.render.engine = "CYCLES"
@@ -183,13 +202,28 @@ def bake_to_plain_materials(size):
 
 
 if output == "glb":
+    for x in keep:
+        for m in x.modifiers:
+            if m.type == "ARMATURE":
+                m.show_viewport = True
+    bpy.context.view_layer.update()
+    graph = bpy.context.evaluated_depsgraph_get()
+    for x in keep:
+        posed = bpy.data.meshes.new_from_object(x.evaluated_get(graph))
+        for m in [m for m in x.modifiers if m.type == "ARMATURE"]:
+            x.modifiers.remove(m)
+        x.data = posed
     bake_to_plain_materials(2048 if full else 1024)
     for x in keep:
         x.select_set(True)
     bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", use_selection=True, export_apply=True, export_image_format="JPEG", export_jpeg_quality=85)
     sys.exit(0)
 
-pts = [x.matrix_world @ mathutils.Vector(c) for x in keep for c in x.bound_box]
+depsgraph = bpy.context.evaluated_depsgraph_get()
+head = [x for x in keep if any(col.name.endswith("_helmet") for col in x.users_collection)]
+if framing == "head" and not head:
+    sys.exit("Headshot requested but this core has no helmet region")
+pts = [x.matrix_world @ mathutils.Vector(c) for x in (head if framing == "head" else keep) for c in x.evaluated_get(depsgraph).bound_box]
 lo = mathutils.Vector([min(p[i] for p in pts) for i in range(3)])
 hi = mathutils.Vector([max(p[i] for p in pts) for i in range(3)])
 c = (lo + hi) / 2
@@ -198,7 +232,7 @@ cd = bpy.data.cameras.new("cam")
 cd.lens = 85
 cam = bpy.data.objects.new("cam", cd)
 sc.collection.objects.link(cam)
-cam.location = (c.x + height * 2.6, c.y, c.z)
+cam.location = (c.x + (max(hi - lo) * 3.4 if framing == "head" else height * 2.6), c.y, c.z)
 cam.rotation_euler = (1.5708, 0, 1.5708)
 sc.camera = cam
 for rot, energy in (((0.8, 0, 2.2), 4), ((1.0, 0, 0.6), 2)):
@@ -216,7 +250,7 @@ sc.cycles.samples = 128 if full else 48
 sc.cycles.use_denoising = True
 scale = 3 if full else 1
 sc.render.resolution_x = 700 * scale
-sc.render.resolution_y = 1000 * scale
+sc.render.resolution_y = (700 if framing == "head" else 1000) * scale
 sc.render.image_settings.file_format = "PNG"
 sc.render.use_file_extension = False
 sc.render.filepath = out

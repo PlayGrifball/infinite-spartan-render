@@ -71,4 +71,28 @@ public class IntegrationTests
         Assert.That(System.Text.Encoding.ASCII.GetString(bytes, 0, 4), Is.EqualTo("glTF"));
         Assert.That(bytes.Length, Is.GreaterThan(100_000));
     }
+
+    [Test]
+    public async Task APlayersStance_PosesTheGlb()
+    {
+        var output = Path.Combine(_work, "mark-vii-stance.glb");
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb", Stance = 39388885 }, output, CancellationToken.None);
+
+        Keep(output);
+        var bytes = await File.ReadAllBytesAsync(output);
+        Assert.That(System.Text.Encoding.ASCII.GetString(bytes, 0, 4), Is.EqualTo("glTF"));
+        Assert.That(bytes.Length, Is.GreaterThan(100_000));
+    }
+
+    [Test]
+    public async Task AHeadshotInAStance_RendersAPng()
+    {
+        var output = Path.Combine(_work, "mark-vii-head.png");
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Framing = "head", Stance = 39388885 }, output, CancellationToken.None);
+
+        Keep(output);
+        Assert.That((await File.ReadAllBytesAsync(output)).Length, Is.GreaterThan(20_000));
+    }
 }

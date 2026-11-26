@@ -145,6 +145,8 @@ public class ApiTests
     [TestCase("""{"core":"Mark VII","output":"png","size":"huge"}""")]
     [TestCase("""{"core":"Mark VII","coating":"1; rm -rf /","output":"png","size":"small"}""")]
     [TestCase("""{"core":"Mark VII","coating":"12345678901234","output":"png","size":"small"}""")]
+    [TestCase("""{"core":"Mark VII","framing":"legs"}""")]
+    [TestCase("""{"core":"Mark VII","stance":"1; rm -rf /"}""")]
     public async Task AnInvalidLoadout_Gets400_WithoutRendering(string json)
     {
         var response = await _client.PostAsync("/spartans", new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
@@ -268,6 +270,24 @@ public class LoadoutTests
     public void ADifferentCoating_ChangesTheId()
     {
         Assert.That(new Loadout { Core = "x", Coating = "1" }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Coating = "2" }.Id()));
+    }
+
+    [Test]
+    public void ADifferentFraming_ChangesTheId()
+    {
+        Assert.That(new Loadout { Core = "x", Framing = "body" }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Framing = "head" }.Id()));
+    }
+
+    [Test]
+    public void ADifferentStance_ChangesTheId()
+    {
+        Assert.That(new Loadout { Core = "x", Stance = 1 }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Stance = 2 }.Id()));
+    }
+
+    [Test]
+    public void NoStance_IsTheDefaultStance()
+    {
+        Assert.That(new Loadout { Core = "x" }.Id(), Is.EqualTo(new Loadout { Core = "x", Stance = null }.Id()));
     }
 }
 

@@ -17,7 +17,9 @@ POST /spartans
   "armor": { "helmet": "<permutation name>", "<region>": "<permutation name>" },
   "coating": "1120495519",
   "output": "png",     // png | glb
-  "size": "small"      // small | full
+  "size": "small"      // small   "framing": "body",   // body | head (head frames the helmet)
+  "stance": 39388885   // optional StanceId of a player's action pose; left out = a default relaxed stance (png only)
+| full
 }
 -> 202 { "id": "...", "state": "queued", "output": "png" }
 
@@ -58,3 +60,6 @@ Licensed MIT; Ekur is GPL-3.0 and is fetched at image build time.
 - **Telemetry**: metrics and traces go out over OTLP only, configured by the standard `OTEL_*` variables and on when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Metrics: `spartan_render.jobs` (by `outcome`: done, failed, cancelled, cached, rejected), `spartan_render.duration` (seconds), `spartan_render.queue_depth`; each render is one `render` span.
 - **Client address**: behind a proxy, set `ForwardedHeaders:KnownIPNetworks` (or `KnownProxies`, `ForwardedForHeaderName`) so the submit rate limit counts real clients.
 - **Helm chart**: `charts/infinite-spartan-render` (one replica, Recreate, read-only root, the game data PVC mounted read-only at `/data`, a cache PVC, NetworkPolicy, Traefik IngressRoute, PrometheusRule). CI lints, unit-tests and schema-checks it.
+
+The stance is a Halo animation: a player's `actionPosePath` item (gateway `gamecms/item`) carries a `StanceId`, and
+the file `anim_<StanceId>_*.ekuranim` must be in `<data folder>/stances/`. A GLB stays in the rest pose.
