@@ -17,10 +17,12 @@ public class ApiTests
 
         public Task? Gate;
         public string? LastPath;
+        public readonly System.Collections.Concurrent.ConcurrentBag<Loadout> Loadouts = new();
 
         public async Task RunAsync(Loadout loadout, string outputPath, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref Calls);
+            Loadouts.Add(loadout);
             LastPath = outputPath;
             if (Gate is not null) await Gate.WaitAsync(cancellationToken);
             await Task.Delay(20, cancellationToken);
@@ -153,6 +155,91 @@ public class ApiTests
 
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
         Assert.That(_runner.Calls, Is.EqualTo(0));
+    }
+
+    private static object SetBody(int? stance = 39388885, string core = "Mark VII") =>
+        new { core, armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating = "1120495519", stance, size = "small" };
+
+    private async Task<JsonElement> SetWhenDone(string id)
+    {
+        for (var i = 0; i < 200; i++)
+        {
+            var doc = await _client.GetFromJsonAsync<JsonElement>($"/spartan-sets/{id}");
+            if (doc.GetProperty("state").GetString() is "done" or "failed") return doc;
+            await Task.Delay(20);
+        }
+        throw new TimeoutException("the set never finished");
+    }
+
+    [Test]
+    public async Task ASet_RendersTwoGlbsAndFourPngs_InTheStanceAndTheNeutralPose()
+    {
+        var response = await _client.PostAsJsonAsync("/spartan-sets", SetBody());
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        var id = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+
+        var set = await SetWhenDone(id);
+
+        Assert.That(set.GetProperty("state").GetString(), Is.EqualTo("done"));
+        var items = set.GetProperty("items").EnumerateArray().ToDictionary(i => i.GetProperty("name").GetString()!);
+        Assert.That(items.Keys, Is.EquivalentTo(new[] { "stance-glb", "neutral-glb", "stance-body", "stance-head", "neutral-body", "neutral-head" }));
+        Assert.That(items.Values.Select(i => i.GetProperty("url").GetString()).Distinct().Count(), Is.EqualTo(6));
+        foreach (var item in items.Values)
+            Assert.That((await _client.GetAsync(item.GetProperty("url").GetString())).StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That(_runner.Calls, Is.EqualTo(6));
+    }
+
+    [Test]
+    public async Task ASetsNeutralItems_UseTheDefaultStance_AndItsOtherItemsTheChosenOne()
+    {
+        var id = (await (await _client.PostAsJsonAsync("/spartan-sets", SetBody(5))).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+        await SetWhenDone(id);
+
+        Assert.That(_runner.Loadouts.Count(l => l.Stance is null), Is.EqualTo(3));
+        Assert.That(_runner.Loadouts.Count(l => l.Stance == 5), Is.EqualTo(3));
+        Assert.That(_runner.Loadouts.Count(l => l.Output == "glb"), Is.EqualTo(2));
+        Assert.That(_runner.Loadouts.Count(l => l.Framing == "head"), Is.EqualTo(2));
+    }
+
+    [Test]
+    public async Task ASetPostedTwice_RendersOnce()
+    {
+        var id = (await (await _client.PostAsJsonAsync("/spartan-sets", SetBody())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+        await SetWhenDone(id);
+
+        var again = await (await _client.PostAsJsonAsync("/spartan-sets", SetBody())).Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.That(again.GetProperty("id").GetString(), Is.EqualTo(id));
+        Assert.That(again.GetProperty("state").GetString(), Is.EqualTo("done"));
+        Assert.That(_runner.Calls, Is.EqualTo(6));
+    }
+
+    [Test]
+    public async Task ASetWithAFailedRender_IsFailed()
+    {
+        _runner.Fail = true;
+        var id = (await (await _client.PostAsJsonAsync("/spartan-sets", SetBody())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+
+        Assert.That((await SetWhenDone(id)).GetProperty("state").GetString(), Is.EqualTo("failed"));
+    }
+
+    [TestCase("""{"core":"Mark VII"}""", Description = "no stance")]
+    [TestCase("""{"core":"Mark VII","stance":"1; rm -rf /"}""")]
+    [TestCase("""{"core":"Nope","stance":1}""")]
+    [TestCase("""{"core":"Mark VII","stance":1,"size":"huge"}""")]
+    public async Task AnInvalidSet_Gets400_WithoutRendering(string json)
+    {
+        var response = await _client.PostAsync("/spartan-sets", new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
+
+        Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
+        Assert.That(_runner.Calls, Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task AnUnknownSet_Is404()
+    {
+        Assert.That((await _client.GetAsync("/spartan-sets/nope")).StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
+        Assert.That((await _client.GetAsync("/spartan-sets/" + new string('a', 32))).StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
     }
 
     [Test]

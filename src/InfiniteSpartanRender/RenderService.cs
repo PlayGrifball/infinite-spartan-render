@@ -52,6 +52,32 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         return null;
     }
 
+    private readonly ConcurrentDictionary<string, SpartanSetRequest> _sets = new();
+
+    // Null when the queue cannot take the whole set; what was queued still renders.
+    public SpartanSetStatus? SubmitSet(SpartanSetRequest request)
+    {
+        var id = request.Id();
+        foreach (var (_, loadout) in request.Items())
+            if (Submit(loadout) is null) return null;
+        _sets[id] = request;
+        return SetStatus(id);
+    }
+
+    public SpartanSetStatus? SetStatus(string id)
+    {
+        if (!_sets.TryGetValue(id, out var request)) return null;
+        var items = request.Items()
+            .Select(i => new SpartanSetItem(i.Name, i.Loadout.Id(), i.Loadout.Output,
+                Status(i.Loadout.Id()) ?? new JobStatus(i.Loadout.Id(), JobState.Failed, FailureMessage, DateTimeOffset.UtcNow)))
+            .ToList();
+        var state = items.Any(i => i.Status.State == JobState.Failed) ? JobState.Failed
+            : items.All(i => i.Status.State == JobState.Done) ? JobState.Done
+            : items.Any(i => i.Status.State != JobState.Queued) ? JobState.Running
+            : JobState.Queued;
+        return new SpartanSetStatus(id, state.ToString().ToLowerInvariant(), items);
+    }
+
     // Drops cache files past CacheDays and finished job records past a day.
     public void Sweep(DateTimeOffset now)
     {

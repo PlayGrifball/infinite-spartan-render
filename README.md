@@ -17,15 +17,29 @@ POST /spartans
   "armor": { "helmet": "<permutation name>", "<region>": "<permutation name>" },
   "coating": "1120495519",
   "output": "png",     // png | glb
-  "size": "small"      // small   "framing": "body",   // body | head (head frames the helmet)
-  "stance": 39388885   // optional StanceId of a player's action pose; left out = a default relaxed stance (png only)
-| full
+  "size": "small",     // small | full
+  "framing": "body",   // body | head (head frames the helmet)
+  "stance": 39388885   // optional StanceId of a player's action pose; left out = the default relaxed stance
 }
 -> 202 { "id": "...", "state": "queued", "output": "png" }
 
 GET /spartans/{id}        -> { "id", "state": queued|running|done|failed, "error" }
 GET /spartans/{id}/file   -> the PNG or GLB (404 until done)
 ```
+
+A whole Spartan, in a chosen stance and in the neutral one, is one request:
+
+```
+POST /spartan-sets
+{ "core": "Mark VII", "armor": {}, "coating": "1120495519", "stance": 39388885, "size": "small" }   // stance is required
+-> 202 { "id", "state", "items": [ { "name", "state", "output", "url" } ] }
+
+GET /spartan-sets/{id}    -> the same; state is the worst of the six: failed, else done when all are, else running or queued
+```
+
+The six items are `stance-glb`, `stance-body`, `stance-head`, `neutral-glb`, `neutral-body` and `neutral-head`; each
+`url` is a `/spartans/{id}/file`. They are ordinary jobs (the same cache, queue and limits), so a set whose pieces were
+rendered before costs nothing, and a GLB takes minutes. Sets, like jobs, do not survive a restart: post again.
 
 The id is a hash of the loadout, so asking again returns the cached file. A region left out of `armor` gets the core's
 default piece; `coating` left out gets the default coating.
@@ -62,4 +76,5 @@ Licensed MIT; Ekur is GPL-3.0 and is fetched at image build time.
 - **Helm chart**: `charts/infinite-spartan-render` (one replica, Recreate, read-only root, the game data PVC mounted read-only at `/data`, a cache PVC, NetworkPolicy, Traefik IngressRoute, PrometheusRule). CI lints, unit-tests and schema-checks it.
 
 The stance is a Halo animation: a player's `actionPosePath` item (gateway `gamecms/item`) carries a `StanceId`, and
-the file `anim_<StanceId>_*.ekuranim` must be in `<data folder>/stances/`. A GLB stays in the rest pose.
+the file `anim_<StanceId>_*.ekuranim` must be in `<data folder>/stances/`. A GLB is the posed mesh baked
+to a static model (no skeleton).
