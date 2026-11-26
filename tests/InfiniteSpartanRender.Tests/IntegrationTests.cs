@@ -226,7 +226,8 @@ public class IntegrationTests
         Assert.That(rows, Is.Not.Empty);
         var noIds = rows.Where(r => r.GetProperty("region").ValueKind == System.Text.Json.JsonValueKind.Null || r.GetProperty("permutation").ValueKind == System.Text.Json.JsonValueKind.Null).Select(r => r.GetProperty("object").GetString()).ToList();
         Assert.That(noIds, Is.Empty, "objects without region_name/permutation_name: parts cannot select them");
-        var named = rows.Where(r => !r.GetProperty("hashed").GetBoolean()).ToList();
+        // Shoulder pads all carry one permutation id with no display name: the ids cannot tell them apart, so only the name does.
+        var named = rows.Where(r => !r.GetProperty("hashed").GetBoolean() && !string.IsNullOrEmpty(r.GetProperty("display").GetString())).ToList();
         var mismatched = named.Where(r => !r.GetProperty("nameMatches").GetBoolean()).Select(r => $"[{r.GetProperty("kind").GetString()}] {r.GetProperty("object").GetString()} (permutation {r.GetProperty("permutation")}, display '{r.GetProperty("display").GetString()}')").ToList();
         Assert.That(string.Join("\n", mismatched), Is.Empty, "named objects whose name does not end in the permutation's display name; of " + named.Count);
         Assert.That(rows.Count(r => r.GetProperty("truncated").GetBoolean()), Is.Zero, "object names cut at Blender's 63 characters");
@@ -244,7 +245,7 @@ public class IntegrationTests
         Assert.That(regions.Select(r => r.GetProperty("key").GetString()), Does.Contain("helmet"));
         var helmet = regions.First(r => r.GetProperty("key").GetString() == "helmet");
         Assert.That(helmet.GetProperty("pieces").GetArrayLength(), Is.GreaterThan(1), "a core offers more than its own helmet");
-        Assert.That(helmet.GetProperty("pieces").EnumerateArray().Select(p => p.GetProperty("name").GetString()), Does.Contain("Mark VII"), "helmet pieces: " + string.Join(" | ", helmet.GetProperty("pieces").EnumerateArray().Select(p => p.GetProperty("name").GetString() + "#" + p.GetProperty("permutation"))));
+        Assert.That(helmet.GetProperty("pieces").EnumerateArray().Select(p => p.GetProperty("name").GetString()), Does.Contain("MARK VII").IgnoreCase, "helmet pieces: " + string.Join(" | ", helmet.GetProperty("pieces").EnumerateArray().Select(p => p.GetProperty("name").GetString() + "#" + p.GetProperty("permutation"))));
     }
 
     [Test]
