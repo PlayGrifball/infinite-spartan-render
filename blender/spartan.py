@@ -125,9 +125,9 @@ def listing():
     # Every mesh in the region and kit collections with its ids and the display name of its permutation.
     rp = json.loads(ext.read_text())
     display = {}
-    for region in rp.values():
+    for rid, region in rp.items():
         for pid, perm in (region.get("permutations") or {}).items():
-            display[str(pid)] = perm.get("name")
+            display[(str(rid), str(pid))] = perm.get("name")
     rows = []
     for col in bpy.data.collections:
         if not col.name.startswith(("[REGION]", "[KIT]")):
@@ -137,7 +137,7 @@ def listing():
             if x.type != "MESH":
                 continue
             pid = x.get("permutation_name")
-            want = display.get(str(pid))
+            want = display.get((str(x.get("region_name")), str(pid)))
             base = x.name.split(".")[0] if re.search(r"\.\d{3}$", x.name) else x.name
             rows.append({
                 "collection": col.name, "kind": kind, "key": rest.split("_", 1)[1] if "_" in rest else rest,
