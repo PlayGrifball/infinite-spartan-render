@@ -29,7 +29,7 @@ render:
   # Submissions per client address per minute (429 above it).
   submitsPerMinute: 60
   cacheDays: 30
-  timeoutSeconds: 900
+  timeoutSeconds: 1800
   # Blender's scratch space (HOME for each run), an emptyDir at /tmp.
   workSize: 2Gi
 

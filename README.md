@@ -37,7 +37,7 @@ default piece; `coating` left out gets the default coating.
 
 `BlenderPath`, `ScriptPath`, `CacheDirectory` (`/cache`), `WorkDirectory` (`/tmp/render`), `MaxConcurrentJobs` (1; a
 render needs several GB of RAM), `MaxQueued` (20; more gets 503), `SubmitsPerMinute` (60 per address; more gets 429),
-`CacheDays` (30; older results are deleted), `TimeoutSeconds` (900), `Cores`.
+`CacheDays` (30; older results are deleted), `TimeoutSeconds` (1800), `Cores`.
 
 Jobs are held in memory: after a restart an unfinished job answers 404 and the client posts the loadout again (finished
 results are still in the cache). A render that cannot load all its materials fails rather than being cached degraded.

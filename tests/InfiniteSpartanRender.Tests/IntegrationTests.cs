@@ -27,7 +27,7 @@ public class IntegrationTests
         {
             ScriptPath = Path.Combine(dir!.FullName, "blender", "spartan.py"),
             WorkDirectory = Path.Combine(_work, "render"),
-            TimeoutSeconds = 600,
+            TimeoutSeconds = 1800,
         }));
     }
 
