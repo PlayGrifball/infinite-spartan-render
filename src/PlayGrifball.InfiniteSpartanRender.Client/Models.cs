@@ -1,5 +1,8 @@
 namespace PlayGrifball.InfiniteSpartanRender.Client;
 
+/// <summary>A piece by the game's ids: the model region id and the permutation id.</summary>
+public sealed record SpartanPart(int Region, int Permutation);
+
 /// <summary>What to render: a core, its armor pieces and coating, and how.</summary>
 public sealed record SpartanLoadout
 {
@@ -8,6 +11,9 @@ public sealed record SpartanLoadout
 
     /// <summary>Region (e.g. <c>helmet</c>) to permutation name; a region left out gets the core's default piece.</summary>
     public IDictionary<string, string> Armor { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>Pieces by region id and permutation id, for pieces with no name (some kits); one per region. They win over <see cref="Armor"/>.</summary>
+    public IList<SpartanPart> Parts { get; init; } = new List<SpartanPart>();
 
     /// <summary>A coating id; null or empty is the default coating.</summary>
     public string? Coating { get; init; }
@@ -37,6 +43,7 @@ public sealed record SpartanSetRequest
 {
     public required string Core { get; init; }
     public IDictionary<string, string> Armor { get; init; } = new Dictionary<string, string>();
+    public IList<SpartanPart> Parts { get; init; } = new List<SpartanPart>();
     public string? Coating { get; init; }
 
     /// <summary>A StanceId from a player's action pose item (required by the API).</summary>

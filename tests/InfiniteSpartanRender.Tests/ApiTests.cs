@@ -435,6 +435,60 @@ public class LoadoutTests
     }
 
     [Test]
+    public void PartOrder_DoesNotChangeTheId()
+    {
+        var a = new Loadout { Core = "Mark VII", Parts = new() { new(1, 2), new(3, 4) } };
+        var b = new Loadout { Core = "Mark VII", Parts = new() { new(3, 4), new(1, 2) } };
+
+        Assert.That(a.Id(), Is.EqualTo(b.Id()));
+    }
+
+    [Test]
+    public void ADifferentPart_ChangesTheId()
+    {
+        Assert.That(new Loadout { Core = "x", Parts = new() { new(1, 2) } }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Parts = new() { new(1, 3) } }.Id()));
+        Assert.That(new Loadout { Core = "x", Parts = new() { new(1, 2) } }.Id(), Is.Not.EqualTo(new Loadout { Core = "x" }.Id()));
+    }
+
+    [Test]
+    public void PartsWithNegativeIds_AreValid()
+    {
+        var loadout = new Loadout { Core = "x", Parts = new() { new(-592012529, 1704860283), new(5, -189225007) } };
+
+        Assert.That(loadout.Validate(new[] { "x" }), Is.Null);
+    }
+
+    [Test]
+    public void TwoPartsInOneRegion_AreRefused()
+    {
+        var loadout = new Loadout { Core = "x", Parts = new() { new(1, 2), new(1, 3) } };
+
+        Assert.That(loadout.Validate(new[] { "x" }), Does.Contain("one entry per region"));
+    }
+
+    [Test]
+    public void TooManyParts_AreRefused()
+    {
+        var loadout = new Loadout { Core = "x", Parts = Enumerable.Range(0, 65).Select(i => new PartId(i, 1)).ToList() };
+
+        Assert.That(loadout.Validate(new[] { "x" }), Does.Contain("at most 64"));
+    }
+
+    [Test]
+    public void NullParts_AreRefused()
+    {
+        Assert.That(new Loadout { Core = "x", Parts = null }.Validate(new[] { "x" }), Does.Contain("parts must be an array"));
+    }
+
+    [Test]
+    public void ASetPassesItsPartsToEverySixItems()
+    {
+        var set = new SpartanSetRequest { Core = "x", Stance = 7, Parts = new() { new(1, 2) } };
+
+        Assert.That(set.Items().Select(i => i.Loadout.Parts), Has.All.EqualTo(new List<PartId> { new(1, 2) }));
+    }
+
+    [Test]
     public void ADifferentCoating_ChangesTheId()
     {
         Assert.That(new Loadout { Core = "x", Coating = "1" }.Id(), Is.Not.EqualTo(new Loadout { Core = "x", Coating = "2" }.Id()));

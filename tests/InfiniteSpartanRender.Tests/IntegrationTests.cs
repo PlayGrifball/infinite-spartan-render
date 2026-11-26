@@ -214,6 +214,28 @@ public class IntegrationTests
     }
 
     [Test]
+    public async Task APieceByIds_ExportsAGlb()
+    {
+        // WENDIGO's kit has no permutation name; it is only addressable by region and permutation id.
+        var output = Path.Combine(_work, "chimera-by-ids.glb");
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb", Parts = new() { new(-592012529, 1704860283) } }, output, CancellationToken.None);
+
+        Keep(output);
+        Assert.That(System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(output), 0, 4), Is.EqualTo("glTF"));
+    }
+
+    [Test]
+    public void APieceThatMatchesNothing_FailsTheRender()
+    {
+        var output = Path.Combine(_work, "no-such-part.glb");
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() => _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb", Parts = new() { new(1, 2) } }, output, CancellationToken.None));
+
+        Assert.That(ex!.Message, Does.Contain("No mesh for parts"));
+    }
+
+    [Test]
     public async Task AHeadshotInAStance_RendersAPng()
     {
         var output = Path.Combine(_work, "mark-vii-head.png");

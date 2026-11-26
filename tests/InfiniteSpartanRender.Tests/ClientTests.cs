@@ -32,7 +32,7 @@ public class ClientTests
     {
         var stub = new Stub((_, _) => Reply(HttpStatusCode.Accepted, """{"id":"abc","state":"queued","output":"glb"}"""));
 
-        var job = await ClientFor(stub).SubmitAsync(new SpartanLoadout { Core = "Mark VII", Output = "glb", Stance = 7, Armor = { ["helmet"] = "Mk 7" } });
+        var job = await ClientFor(stub).SubmitAsync(new SpartanLoadout { Core = "Mark VII", Output = "glb", Stance = 7, Armor = { ["helmet"] = "Mk 7" }, Parts = { new SpartanPart(-592012529, 1704860283) } });
 
         Assert.That(job, Is.EqualTo(new SpartanJob("abc", "queued", "glb")));
         var sent = stub.Requests.Single();
@@ -42,6 +42,8 @@ public class ClientTests
         Assert.That(body.GetProperty("output").GetString(), Is.EqualTo("glb"));
         Assert.That(body.GetProperty("stance").GetInt32(), Is.EqualTo(7));
         Assert.That(body.GetProperty("armor").GetProperty("helmet").GetString(), Is.EqualTo("Mk 7"));
+        var part = body.GetProperty("parts").EnumerateArray().Single();
+        Assert.That((part.GetProperty("region").GetInt32(), part.GetProperty("permutation").GetInt32()), Is.EqualTo((-592012529, 1704860283)));
     }
 
     [Test]
