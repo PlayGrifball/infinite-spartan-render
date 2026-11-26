@@ -247,8 +247,11 @@ public class IntegrationTests
         var regions = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(output)).RootElement.GetProperty("regions").EnumerateArray().ToList();
         Assert.That(regions.Select(r => r.GetProperty("key").GetString()), Does.Contain("helmet"));
         var helmet = regions.First(r => r.GetProperty("key").GetString() == "helmet");
-        Assert.That(helmet.GetProperty("pieces").GetArrayLength(), Is.GreaterThan(1), "a core offers more than its own helmet");
-        Assert.That(helmet.GetProperty("pieces").EnumerateArray().Select(p => p.GetProperty("name").GetString()), Does.Contain("MARK VII").IgnoreCase, "helmet pieces: " + string.Join(" | ", helmet.GetProperty("pieces").EnumerateArray().Select(p => p.GetProperty("name").GetString() + "#" + p.GetProperty("permutation"))));
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(helmet.GetProperty("pieces").GetArrayLength(), Is.GreaterThan(1), "a core offers more than its own helmet");
+            Assert.That(helmet.GetProperty("pieces").EnumerateArray().Select(p => p.GetProperty("name").GetString()), Does.Contain("MARK VII").IgnoreCase, "helmet pieces: " + string.Join(" | ", helmet.GetProperty("pieces").EnumerateArray().Select(p => p.GetProperty("name").GetString() + "#" + p.GetProperty("permutation"))));
+        }
     }
 
     [Test]
