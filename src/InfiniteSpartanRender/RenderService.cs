@@ -121,11 +121,10 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         {
             while (true)
             {
-                // Take a slot before taking a job, so waiting jobs stay in the bounded queue.
+                // Wait for a job, then take a slot before taking it, so waiting jobs stay in the bounded queue and an idle service holds no slot (the warm-up needs one).
+                if (!await _queue.Reader.WaitToReadAsync(stoppingToken)) break;
                 await slots.WaitAsync(stoppingToken);
-                (string Id, Loadout Loadout) item;
-                try { item = await _queue.Reader.ReadAsync(stoppingToken); }
-                catch { slots.Release(); throw; }
+                if (!_queue.Reader.TryRead(out var item)) { slots.Release(); continue; }
                 running.RemoveAll(t => t.IsCompleted);
                 running.Add(Task.Run(async () =>
                 {
