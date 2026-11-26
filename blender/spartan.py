@@ -229,6 +229,10 @@ if coating:
     mp.use_default_coating = False
     mp.coating_id = coating
 if visor:
+    # Ekur lists visors from a file in its extension folder (read-only here), so fill the list it caches from the same names
+    options = importlib.import_module(MOD + ".src.ui.material_options")
+    names = sorted(json.loads(Path(f"{EKUR_ASSETS}/all_visors.json").read_text()), key=options.natural_sort_key)
+    options.visor_cache = [(n, n, "") for n in names]
     mp.override_visor = True
     mp.visor = visor
 
