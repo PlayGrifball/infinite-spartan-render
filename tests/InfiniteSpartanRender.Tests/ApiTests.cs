@@ -433,14 +433,14 @@ public class BlenderRunnerTests
     public void TearDown() => Directory.Delete(_dir, true);
 
     [Test]
-    public async Task BlenderIsToldWhereToKeepImportedCores_UnderTheCache()
+    public async Task BlenderIsToldWhereToKeepImportedCoresAndBakedTextures_UnderTheCache()
     {
         var output = Path.Combine(_dir, "out.png");
-        var runner = RunnerFor("for last; do :; done; echo \"$ISR_IMPORT_CACHE\" > \"$last\"", cache: Path.Combine(_dir, "cache"));
+        var runner = RunnerFor("for last; do :; done; echo \"$ISR_IMPORT_CACHE $ISR_BAKE_CACHE\" > \"$last\"", cache: Path.Combine(_dir, "cache"));
 
         await runner.RunAsync(Mark7, output, CancellationToken.None);
 
-        Assert.That((await File.ReadAllTextAsync(output)).Trim(), Is.EqualTo(Path.Combine(_dir, "cache", "imports")));
+        Assert.That((await File.ReadAllTextAsync(output)).Trim(), Is.EqualTo($"{Path.Combine(_dir, "cache", "imports")} {Path.Combine(_dir, "cache", "bakes")}"));
     }
 
     private BlenderRunner RunnerFor(string script, int timeoutSeconds = 30, string cache = "/cache")

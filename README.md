@@ -77,7 +77,10 @@ Licensed MIT; Ekur is GPL-3.0 and is fetched at image build time.
 
 Importing a core takes minutes and does not depend on the loadout or stance, so the imported scene is saved as
 `<cache>/imports/<core>-<key>.blend` (the key covers the core, Blender and the Ekur manifest) and later jobs for that
-core open it. A changed game data folder needs `imports/` cleared; files unused for `CacheDays` are swept.
+core open it. A GLB's baked textures do not depend on the stance either, so they are kept per loadout in
+`<cache>/bakes/<key>/` (the key adds the loadout and the Blender script) and a GLB in another stance of the same armor
+loads them instead of baking again. A changed game data folder needs `imports/` and `bakes/` cleared; files unused for
+`CacheDays` are swept.
 
 The stance is a Halo animation: a player's `actionPosePath` item (gateway `gamecms/item`) carries a `StanceId`, and
 the file `anim_<StanceId>_*.ekuranim` must be in `<data folder>/stances/`. A GLB is the posed mesh baked

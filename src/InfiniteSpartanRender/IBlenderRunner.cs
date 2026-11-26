@@ -47,6 +47,7 @@ public sealed class BlenderRunner(IOptions<RenderOptions> options) : IBlenderRun
             start.Environment["HOME"] = work;
             start.Environment["ISR_DATA"] = o.DataDirectory;
             start.Environment["ISR_IMPORT_CACHE"] = Path.Combine(o.CacheDirectory, "imports");
+            start.Environment["ISR_BAKE_CACHE"] = Path.Combine(o.CacheDirectory, "bakes");
 
             using var process = Process.Start(start) ?? throw new InvalidOperationException("Blender did not start");
             var tail = new Queue<string>();

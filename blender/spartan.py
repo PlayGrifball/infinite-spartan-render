@@ -48,14 +48,17 @@ if not ext.exists():
     shutil.copy(f"{EKUR_ASSETS}/regions_and_permutations.json", ext)
 
 
+def tool_version():
+    manifest = Path(importlib.import_module(MOD).__file__).parent / "blender_manifest.toml"
+    return bpy.app.version_string + "\n" + (manifest.read_text() if manifest.exists() else "")
+
+
 def import_core():
     # Importing a core takes minutes and does not depend on the loadout or the stance: keep the imported scene.
     cache = os.environ.get("ISR_IMPORT_CACHE")
     cached = None
     if cache:
-        manifest = Path(importlib.import_module(MOD).__file__).parent / "blender_manifest.toml"
-        version = manifest.read_text() if manifest.exists() else ""
-        key = hashlib.sha256("\n".join([core, bpy.app.version_string, version]).encode()).hexdigest()[:16]
+        key = hashlib.sha256("\n".join([core, tool_version()]).encode()).hexdigest()[:16]
         cached = Path(cache) / f"{re.sub(r'[^a-z0-9]+', '-', core.lower()).strip('-')}-{key}.blend"
         if cached.exists():
             bpy.ops.wm.open_mainfile(filepath=str(cached), load_ui=False)
@@ -188,6 +191,40 @@ sc.frame_set(1)
 phase("pose")
 
 
+def bake_folder(size):
+    # The baked textures depend on the loadout, not the stance (a pose moves vertices, not UVs): keep them per loadout.
+    cache = os.environ.get("ISR_BAKE_CACHE")
+    if not cache:
+        return None
+    renderer = hashlib.sha256(Path(sys.argv[sys.argv.index("--python") + 1]).read_bytes()).hexdigest()
+    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, size], sort_keys=True)
+    return Path(cache) / hashlib.sha256(ident.encode()).hexdigest()[:32]
+
+
+def bake_object(obj, passes, size, images):
+    for x in bpy.data.objects:
+        x.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    obj.data.uv_layers.active_index = 0
+    mats = [s.material for s in obj.material_slots if s.material]
+    for key, bake_type, space in passes:
+        img = bpy.data.images.new(f"{obj.name}_{key}", size, size, alpha=False)
+        img.colorspace_settings.name = space
+        images[key] = img
+        temp = []
+        for m in mats:
+            node = m.node_tree.nodes.new("ShaderNodeTexImage")
+            node.image = img
+            temp.append((m, node))
+            m.node_tree.nodes.active = node
+        kwargs = {"pass_filter": {"COLOR"}} if bake_type == "DIFFUSE" else {}
+        bpy.ops.object.bake(type=bake_type, margin=8, margin_type="EXTEND", **kwargs)
+        phase("bake")
+        for m, node in temp:
+            m.node_tree.nodes.remove(node)
+
+
 def bake_to_plain_materials(size):
     # Ekur's shader graph is not glTF-exportable: bake what it shows into plain textures on a Principled BSDF.
     sc.render.engine = "CYCLES"
@@ -195,29 +232,28 @@ def bake_to_plain_materials(size):
     sc.cycles.samples = 1
     sc.cycles.use_denoising = False
     passes = (("color", "DIFFUSE", "sRGB"), ("rough", "ROUGHNESS", "Non-Color"), ("normal", "NORMAL", "Non-Color"), ("emit", "EMIT", "sRGB"))
+    folder = bake_folder(size)
     for obj in keep:
-        for x in bpy.data.objects:
-            x.select_set(False)
-        obj.select_set(True)
-        bpy.context.view_layer.objects.active = obj
-        obj.data.uv_layers.active_index = 0
-        mats = [s.material for s in obj.material_slots if s.material]
+        files = {key: folder / f"{re.sub(r'[^A-Za-z0-9._-]+', '-', obj.name)}_{key}.png" for key, _, _ in passes} if folder else {}
         images = {}
-        for key, bake_type, space in passes:
-            img = bpy.data.images.new(f"{obj.name}_{key}", size, size, alpha=False)
-            img.colorspace_settings.name = space
-            images[key] = img
-            temp = []
-            for m in mats:
-                node = m.node_tree.nodes.new("ShaderNodeTexImage")
-                node.image = img
-                temp.append((m, node))
-                m.node_tree.nodes.active = node
-            kwargs = {"pass_filter": {"COLOR"}} if bake_type == "DIFFUSE" else {}
-            bpy.ops.object.bake(type=bake_type, margin=8, margin_type="EXTEND", **kwargs)
-            phase("bake")
-            for m, node in temp:
-                m.node_tree.nodes.remove(node)
+        if files and all(f.exists() for f in files.values()):
+            for key, _, space in passes:
+                img = bpy.data.images.load(str(files[key]))
+                img.colorspace_settings.name = space
+                img.pack()
+                images[key] = img
+                os.utime(files[key])
+            phase("bake_reused")
+        else:
+            bake_object(obj, passes, size, images)
+            for key, img in images.items() if folder else ():
+                folder.mkdir(parents=True, exist_ok=True)
+                part = files[key].with_name(f"{files[key].name}.{os.getpid()}.part")
+                img.filepath_raw = str(part)
+                img.file_format = "PNG"
+                img.save()
+                os.replace(part, files[key])
+                img.filepath_raw = str(files[key])
         plain = bpy.data.materials.new(obj.name)
         plain.use_nodes = True
         nt = plain.node_tree

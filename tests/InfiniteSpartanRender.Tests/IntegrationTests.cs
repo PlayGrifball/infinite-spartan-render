@@ -137,6 +137,30 @@ public class IntegrationTests
     }
 
     [Test]
+    public async Task TheSameArmorInAnotherStance_ReusesTheBakedTextures()
+    {
+        var posed = Path.Combine(_work, "reuse-posed.glb");
+        var neutral = Path.Combine(_work, "reuse-neutral.glb");
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb", Stance = 39388885 }, posed, CancellationToken.None);
+        int mark;
+        lock (_phases) mark = _phases.Count;
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb" }, neutral, CancellationToken.None);
+
+        double baked, reused;
+        lock (_phases)
+        {
+            var second = _phases.Skip(mark).ToArray();
+            baked = second.Where(p => p.Phase == "bake").Sum(p => p.Seconds);
+            reused = second.Where(p => p.Phase == "bake_reused").Sum(p => p.Seconds);
+        }
+        Assert.That(baked, Is.EqualTo(0), "the second GLB bakes nothing");
+        Assert.That(reused, Is.GreaterThan(0), "and loads the first one's textures");
+        Assert.That(System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(neutral), 0, 4), Is.EqualTo("glTF"));
+        Assert.That(new FileInfo(neutral).Length, Is.GreaterThan(100_000));
+    }
+
+    [Test]
     public async Task AHeadshotInAStance_RendersAPng()
     {
         var output = Path.Combine(_work, "mark-vii-head.png");
