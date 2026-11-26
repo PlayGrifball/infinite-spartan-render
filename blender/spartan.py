@@ -99,6 +99,32 @@ if output == "warm":
     Path(out).write_text("warm")
     sys.exit(0)
 
+if output == "names":
+    # Diagnostic: do the imported objects carry the ids, and do their names end in the permutation's display name?
+    rp = json.loads(ext.read_text())
+    display = {}
+    for region in rp.values():
+        for pid, perm in (region.get("permutations") or {}).items():
+            display[str(pid)] = perm.get("name")
+    rows = []
+    for col in bpy.data.collections:
+        if not col.name.startswith(("[REGION]", "[KIT]")):
+            continue
+        for x in col.objects:
+            if x.type != "MESH":
+                continue
+            pid = x.get("permutation_name")
+            want = display.get(str(pid))
+            base = x.name.split(".")[0] if re.search(r"\.\d{3}$", x.name) else x.name
+            rows.append({
+                "collection": col.name, "object": x.name, "region": x.get("region_name"), "permutation": pid,
+                "display": want, "hashed": bool(HASHED.fullmatch(x.name)),
+                "nameMatches": bool(want) and base.endswith("_" + want),
+                "truncated": len(x.name) >= 63,
+            })
+    Path(out).write_text(json.dumps(rows))
+    sys.exit(0)
+
 
 def region_key(col):
     name = col.name.removeprefix("[REGION] ")

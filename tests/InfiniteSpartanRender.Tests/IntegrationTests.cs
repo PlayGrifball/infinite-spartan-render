@@ -213,6 +213,25 @@ public class IntegrationTests
         Assert.That(phases, Is.EqualTo(new[] { "import_cached" }), "only the check ran, no import or open");
     }
 
+    // The mapping gives a piece's permutation display name; the name-based `armor` input finds the object by it.
+    [Test]
+    public async Task ImportedObjects_CarryTheIdsAndTheirNamesEndInThePermutationName()
+    {
+        var output = Path.Combine(_work, "names-mark-vii.json");
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "names" }, output, CancellationToken.None);
+
+        Keep(output);
+        var rows = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(output)).RootElement.EnumerateArray().ToList();
+        Assert.That(rows, Is.Not.Empty);
+        var noIds = rows.Where(r => r.GetProperty("region").ValueKind == System.Text.Json.JsonValueKind.Null || r.GetProperty("permutation").ValueKind == System.Text.Json.JsonValueKind.Null).Select(r => r.GetProperty("object").GetString()).ToList();
+        Assert.That(noIds, Is.Empty, "objects without region_name/permutation_name: parts cannot select them");
+        var named = rows.Where(r => !r.GetProperty("hashed").GetBoolean()).ToList();
+        var mismatched = named.Where(r => !r.GetProperty("nameMatches").GetBoolean()).Select(r => $"{r.GetProperty("object").GetString()} (permutation {r.GetProperty("permutation")}, display '{r.GetProperty("display").GetString()}')").ToList();
+        Assert.That(mismatched, Is.Empty, "named objects whose name does not end in the permutation's display name; of " + named.Count);
+        Assert.That(rows.Count(r => r.GetProperty("truncated").GetBoolean()), Is.Zero, "object names cut at Blender's 63 characters");
+    }
+
     [Test]
     public async Task APieceByIds_ExportsAGlb()
     {
