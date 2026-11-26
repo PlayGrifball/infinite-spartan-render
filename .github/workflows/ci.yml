@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# A new push to a PR cancels the older run, so slow integration jobs do not pile up on the one in-cluster runner.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
