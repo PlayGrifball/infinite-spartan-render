@@ -448,7 +448,7 @@ public class ApiTests
     }
 
     [Test]
-    public async Task AWarm_KeepsACatalogItAlreadyHas_InsteadOfMakingItAgain()
+    public async Task AWarm_MakesTheCatalogAgain_SoAnUpdatedEkurOrBlenderIsNotListedStale()
     {
         var cache = Path.Combine(Path.GetTempPath(), "isr-cache-" + Guid.NewGuid().ToString("N"));
         _settings["Render:CacheDirectory"] = cache;
@@ -458,9 +458,75 @@ public class ApiTests
         await File.WriteAllTextAsync(path, """{"name":"Mark VII","regions":[]}""");
         Start();
         for (var i = 0; i < 100 && _runner.Warmed.Count < new RenderOptions().Cores.Length; i++) await Task.Delay(50);
-        await Task.Delay(200);
+        for (var i = 0; i < 100 && !_runner.Loadouts.Any(l => l.Output == "catalog" && l.Core == "Mark VII"); i++) await Task.Delay(50);
 
-        Assert.That(_runner.Loadouts.Count(l => l.Output == "catalog" && l.Core == "Mark VII"), Is.Zero);
+        Assert.That(_runner.Loadouts.Count(l => l.Output == "catalog" && l.Core == "Mark VII"), Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task TheCatalog_ReadsCoatingsAndVisorsAgain_WhenTheirFilesAppearLater()
+    {
+        var data = Scratch();
+        var assets = Scratch();
+        _settings["Render:DataDirectory"] = data;
+        _settings["Render:EkurAssets"] = assets;
+        Start();
+        var before = await _client.GetFromJsonAsync<JsonElement>("/catalog");
+        Directory.CreateDirectory(Path.Combine(data, "stylelists"));
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "a.json"), """{"styles":{"7":{}}}""");
+        await File.WriteAllTextAsync(Path.Combine(assets, "all_visors.json"), """{"Alpha":{}}""");
+
+        var after = await _client.GetFromJsonAsync<JsonElement>("/catalog");
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(before.GetProperty("coatings").GetArrayLength(), Is.Zero);
+            Assert.That(after.GetProperty("coatings").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "7" }));
+            Assert.That(after.GetProperty("visors").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "Alpha" }));
+        }
+    }
+
+    [Test]
+    public async Task TheCatalog_SkipsAMalformedStylelist_AndAMalformedVisorFile_InsteadOfFailing()
+    {
+        var data = Scratch();
+        var assets = Scratch();
+        Directory.CreateDirectory(Path.Combine(data, "stylelists"));
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "a.json"), """{"styles":{"7":{}}}""");
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "b.json"), "{truncated");
+        await File.WriteAllTextAsync(Path.Combine(assets, "all_visors.json"), "{truncated");
+        _settings["Render:DataDirectory"] = data;
+        _settings["Render:EkurAssets"] = assets;
+        Start();
+
+        var response = await _client.GetAsync("/catalog");
+        var catalog = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(response.StatusCode, Is.EqualTo(System.Net.HttpStatusCode.OK));
+            Assert.That(catalog.GetProperty("coatings").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "7" }));
+            Assert.That(catalog.GetProperty("visors").GetArrayLength(), Is.Zero);
+        }
+    }
+
+    [Test]
+    public async Task TheCatalog_IsNotBuiltAgain_WhileNoFileChanged_ButIsWhenOneDoes()
+    {
+        var data = Scratch();
+        var service = new CatalogService(Microsoft.Extensions.Options.Options.Create(new RenderOptions { CacheDirectory = Scratch(), DataDirectory = data, EkurAssets = Scratch() }));
+        var first = service.Get("");
+        var second = service.Get("");
+        Directory.CreateDirectory(Path.Combine(data, "stylelists"));
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "a.json"), """{"styles":{"7":{}}}""");
+        var third = service.Get("");
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(second, Is.SameAs(first));
+            Assert.That(third, Is.Not.SameAs(first));
+            Assert.That(third.Coatings, Is.EqualTo(new[] { "7" }));
+        }
     }
 
     [Test]

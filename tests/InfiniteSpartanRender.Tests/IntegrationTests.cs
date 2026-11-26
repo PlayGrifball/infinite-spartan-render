@@ -250,10 +250,16 @@ public class IntegrationTests
     [Test]
     public async Task APieceByIds_ExportsAGlb()
     {
-        // WENDIGO's kit has no permutation name; it is only addressable by region and permutation id.
-        var output = Path.Combine(_work, "chimera-by-ids.glb");
+        // A piece of the core's own catalog, an unnamed one first: those are only addressable by region and permutation id.
+        var catalogFile = Path.Combine(_work, "catalog-for-ids.json");
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "catalog" }, catalogFile, CancellationToken.None);
+        var pieces = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(catalogFile)).RootElement.GetProperty("regions").EnumerateArray()
+            .SelectMany(r => r.GetProperty("pieces").EnumerateArray().Select(p => (Region: r.GetProperty("region").GetInt32(), Permutation: p.GetProperty("permutation").GetInt32(), Named: p.GetProperty("name").ValueKind == System.Text.Json.JsonValueKind.String)))
+            .OrderBy(p => p.Named).ToList();
+        var piece = pieces.First();
+        var output = Path.Combine(_work, "piece-by-ids.glb");
 
-        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb", Parts = new() { new(-592012529, 1704860283) } }, output, CancellationToken.None);
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb", Parts = new() { new(piece.Region, piece.Permutation) } }, output, CancellationToken.None);
 
         Keep(output);
         Assert.That(System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(output), 0, 4), Is.EqualTo("glTF"));
