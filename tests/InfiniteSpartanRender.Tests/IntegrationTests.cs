@@ -27,6 +27,7 @@ public class IntegrationTests
         {
             ScriptPath = Path.Combine(dir!.FullName, "blender", "spartan.py"),
             WorkDirectory = Path.Combine(_work, "render"),
+            CacheDirectory = Path.Combine(_work, "cache"),
             TimeoutSeconds = 1800,
         }));
     }
@@ -39,7 +40,6 @@ public class IntegrationTests
     public void StartTimingTest()
     {
         _current = TestContext.CurrentContext.Test.Name;
-        if (_listener is not null) return;
         _listener = new System.Diagnostics.Metrics.MeterListener();
         _listener.InstrumentPublished = (i, l) => { if (i.Meter.Name == RenderTelemetry.Name && i.Name == "spartan_render.phase_duration") l.EnableMeasurementEvents(i); };
         _listener.SetMeasurementEventCallback<double>((_, value, tags, _) =>
@@ -50,10 +50,16 @@ public class IntegrationTests
         _listener.Start();
     }
 
+    [TearDown]
+    public void StopTimingTest()
+    {
+        _listener?.Dispose();
+        _listener = null;
+    }
+
     // One table of where each render's time went, in the job summary and next to the renders.
     private void WriteTimings()
     {
-        _listener?.Dispose();
         var lines = new List<string> { "### Render phases", "", "| test | phase | samples | seconds |", "|---|---|---|---|" };
         lock (_phases)
         {
@@ -75,6 +81,10 @@ public class IntegrationTests
     public void TearDown()
     {
         WriteTimings();
+        // Three tests render Mark VII: the first imports it (minutes), the others open the saved import.
+        double[] imports;
+        lock (_phases) imports = _phases.Where(p => p.Phase == "import" && !p.Test.Contains("Yoroi") && !p.Test.Contains("WithoutABodyType")).Select(p => p.Seconds).ToArray();
+        if (imports.Length == 3) Assert.That(imports.Count(s => s < 60), Is.GreaterThanOrEqualTo(2), "a core's import is reused: " + string.Join(", ", imports));
         if (_work.Length > 0 && Directory.Exists(_work)) Directory.Delete(_work, recursive: true);
     }
 
@@ -98,6 +108,25 @@ public class IntegrationTests
         var bytes = await File.ReadAllBytesAsync(output);
         Assert.That(bytes.AsSpan(0, 8).ToArray(), Is.EqualTo(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }), "PNG signature");
         Assert.That(bytes.Length, Is.GreaterThan(20_000), "a Spartan, not an empty frame");
+        Assert.That(CornerAlpha(bytes), Is.EqualTo(0), "the background is transparent");
+    }
+
+    // Alpha of the top-left pixel of an 8-bit RGBA PNG. On the first row every filter predicts from zeros, so the stored bytes are the pixel.
+    private static int CornerAlpha(byte[] png)
+    {
+        Assert.That((bytes: png[24], type: png[25]), Is.EqualTo((bytes: (byte)8, type: (byte)6)), "8-bit RGBA");
+        using var idat = new MemoryStream();
+        for (var at = 8; at + 8 <= png.Length;)
+        {
+            var length = (png[at] << 24) | (png[at + 1] << 16) | (png[at + 2] << 8) | png[at + 3];
+            if (System.Text.Encoding.ASCII.GetString(png, at + 4, 4) == "IDAT") idat.Write(png, at + 8, length);
+            at += 12 + length;
+        }
+        idat.Position = 0;
+        using var inflate = new System.IO.Compression.ZLibStream(idat, System.IO.Compression.CompressionMode.Decompress);
+        var first = new byte[5];
+        inflate.ReadExactly(first);
+        return first[4];
     }
 
     [Test]
@@ -127,6 +156,32 @@ public class IntegrationTests
     }
 
     [Test]
+    public async Task TheSameArmorInAnotherStance_ReusesTheBakedTextures()
+    {
+        var posed = Path.Combine(_work, "reuse-posed.glb");
+        var neutral = Path.Combine(_work, "reuse-neutral.glb");
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb", Stance = 39388885 }, posed, CancellationToken.None);
+        int mark;
+        lock (_phases) mark = _phases.Count;
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb" }, neutral, CancellationToken.None);
+
+        double baked, reused;
+        lock (_phases)
+        {
+            var second = _phases.Skip(mark).ToArray();
+            baked = second.Where(p => p.Phase == "bake").Sum(p => p.Seconds);
+            reused = second.Where(p => p.Phase == "bake_reused").Sum(p => p.Seconds);
+        }
+        Keep(posed);
+        Keep(neutral);
+        Assert.That(baked, Is.EqualTo(0), "the second GLB bakes nothing");
+        Assert.That(reused, Is.GreaterThan(0), "and loads the first one's textures");
+        Assert.That(System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(neutral), 0, 4), Is.EqualTo("glTF"));
+        Assert.That(new FileInfo(neutral).Length, Is.GreaterThan(100_000));
+    }
+
+    [Test]
     public async Task AHeadshotInAStance_RendersAPng()
     {
         var output = Path.Combine(_work, "mark-vii-head.png");
@@ -134,6 +189,8 @@ public class IntegrationTests
         await _runner.RunAsync(new Loadout { Core = "Mark VII", Framing = "head", Stance = 39388885 }, output, CancellationToken.None);
 
         Keep(output);
-        Assert.That((await File.ReadAllBytesAsync(output)).Length, Is.GreaterThan(20_000));
+        var bytes = await File.ReadAllBytesAsync(output);
+        Assert.That(bytes.Length, Is.GreaterThan(20_000));
+        Assert.That(CornerAlpha(bytes), Is.EqualTo(0), "the background is transparent");
     }
 }

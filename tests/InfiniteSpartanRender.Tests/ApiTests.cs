@@ -360,6 +360,23 @@ public class ApiTests
     }
 
     [Test]
+    public async Task TheSweep_DropsOldImportedCores_InTheImportsFolder()
+    {
+        var imports = Path.Combine(_cache, "imports");
+        Directory.CreateDirectory(imports);
+        var old = Path.Combine(imports, "mark-vii-aaaa.blend");
+        var fresh = Path.Combine(imports, "yoroi-bbbb.blend");
+        await File.WriteAllTextAsync(old, "x");
+        await File.WriteAllTextAsync(fresh, "x");
+        File.SetLastWriteTimeUtc(old, DateTime.UtcNow.AddDays(-40));
+
+        _factory.Services.GetRequiredService<RenderService>().Sweep(DateTimeOffset.UtcNow);
+
+        Assert.That(File.Exists(old), Is.False);
+        Assert.That(File.Exists(fresh), Is.True);
+    }
+
+    [Test]
     public async Task AnUnknownJob_TellsTheClientToPostAgain()
     {
         var response = await _client.GetAsync("/spartans/" + new string('a', 32));
@@ -415,7 +432,18 @@ public class BlenderRunnerTests
     [TearDown]
     public void TearDown() => Directory.Delete(_dir, true);
 
-    private BlenderRunner RunnerFor(string script, int timeoutSeconds = 30)
+    [Test]
+    public async Task BlenderIsToldWhereToKeepImportedCoresAndBakedTextures_UnderTheCache()
+    {
+        var output = Path.Combine(_dir, "out.png");
+        var runner = RunnerFor("for last; do :; done; echo \"$ISR_IMPORT_CACHE $ISR_BAKE_CACHE\" > \"$last\"", cache: Path.Combine(_dir, "cache"));
+
+        await runner.RunAsync(Mark7, output, CancellationToken.None);
+
+        Assert.That((await File.ReadAllTextAsync(output)).Trim(), Is.EqualTo($"{Path.Combine(_dir, "cache", "imports")} {Path.Combine(_dir, "cache", "bakes")}"));
+    }
+
+    private BlenderRunner RunnerFor(string script, int timeoutSeconds = 30, string cache = "/cache")
     {
         var path = Path.Combine(_dir, "blender");
         File.WriteAllText(path, "#!/bin/sh\n" + script + "\n");
@@ -423,6 +451,7 @@ public class BlenderRunnerTests
         return new BlenderRunner(Microsoft.Extensions.Options.Options.Create(new RenderOptions
         {
             BlenderPath = path,
+            CacheDirectory = cache,
             WorkDirectory = Path.Combine(_dir, "work"),
             TimeoutSeconds = timeoutSeconds,
         }));

@@ -93,7 +93,7 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
     {
         var cutoff = now.AddDays(-Math.Max(1, options.Value.CacheDays)).UtcDateTime;
         if (Directory.Exists(options.Value.CacheDirectory))
-            foreach (var file in Directory.EnumerateFiles(options.Value.CacheDirectory))
+            foreach (var file in Directory.EnumerateFiles(options.Value.CacheDirectory, "*", SearchOption.AllDirectories))
                 if (File.GetLastWriteTimeUtc(file) < cutoff) File.Delete(file);
         foreach (var (id, status) in _jobs)
             if (status.State is JobState.Done or JobState.Failed && status.At < now.AddDays(-1)) _jobs.TryRemove(id, out _);
