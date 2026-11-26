@@ -114,6 +114,13 @@ def default_permutation(objs, core):
     return named or real[0]
 
 
+def as_id(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def listing():
     # Every mesh in the region and kit collections with its ids and the display name of its permutation.
     rp = json.loads(ext.read_text())
@@ -150,10 +157,11 @@ if output == "catalog":
     # What this core can wear: per region (or kit region) the pieces, by the game's ids and, when it has one, a name.
     regions = {}
     for r in listing():
-        if r["region"] is None or r["permutation"] is None:
+        region, permutation = as_id(r["region"]), as_id(r["permutation"])
+        if region is None or permutation is None:
             continue
-        g = regions.setdefault((r["kind"], r["key"]), {"kind": r["kind"], "key": r["key"], "region": int(r["region"]), "pieces": {}})
-        g["pieces"].setdefault(int(r["permutation"]), {"permutation": int(r["permutation"]), "name": r["display"]})
+        g = regions.setdefault((r["kind"], r["key"]), {"kind": r["kind"], "key": r["key"], "region": region, "pieces": {}})
+        g["pieces"].setdefault(permutation, {"permutation": permutation, "name": r["display"]})
     doc = {"core": core, "regions": [
         {**g, "pieces": sorted(g["pieces"].values(), key=lambda p: (p["name"] is None, p["name"] or "", p["permutation"]))}
         for g in sorted(regions.values(), key=lambda g: (g["kind"], g["key"]))]}
@@ -162,10 +170,7 @@ if output == "catalog":
 
 
 def prop_id(obj, name):
-    try:
-        return int(obj.get(name))
-    except (TypeError, ValueError):
-        return None
+    return as_id(obj.get(name))
 
 
 keep = []

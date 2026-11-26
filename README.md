@@ -52,7 +52,7 @@ rendered before costs nothing, and a GLB takes minutes. Sets, like jobs, do not 
   "pendingCores": [ "Chimera" ] }          // still importing; they join when their import is done
 ```
 
-A piece with a `name` goes in `armor` under its region `key`; a piece with `name` null (some kits) goes in `parts` by
+A piece of a REGION with a `name` goes in `armor` under its region `key` (a KIT region's pieces go in `parts`); a piece with `name` null (some kits) goes in `parts` by
 `region` and `permutation`. `kind` is REGION, or KIT for a kit's own regions. A core's entry is written by the start-up
 warm-up from its saved import, so right after a start some cores are in `pendingCores`.
 
