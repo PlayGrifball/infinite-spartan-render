@@ -61,3 +61,14 @@ public sealed record SpartanSet(string Id, string State, IReadOnlyList<SpartanSe
     public bool IsDone => State == "done";
     public bool IsFailed => State == "failed";
 }
+
+/// <summary>A piece of a region: <see cref="Name"/> goes in <see cref="SpartanLoadout.Armor"/>; with no name (some kits) use <see cref="SpartanPart"/> by region and permutation id.</summary>
+public sealed record SpartanCatalogPiece(int Permutation, string? Name);
+
+/// <summary>A region of a core. <see cref="Key"/> is the <see cref="SpartanLoadout.Armor"/> key; <see cref="Kind"/> is REGION, or KIT for a kit's own regions.</summary>
+public sealed record SpartanCatalogRegion(string Kind, string Key, int Region, IReadOnlyList<SpartanCatalogPiece> Pieces);
+
+public sealed record SpartanCatalogCore(string Name, IReadOnlyList<SpartanCatalogRegion> Regions);
+
+/// <summary>What a loadout may name. <see cref="PendingCores"/> are still importing and join when their import is done.</summary>
+public sealed record SpartanCatalog(IReadOnlyList<SpartanCatalogCore> Cores, IReadOnlyList<string> Coatings, IReadOnlyList<string> Visors, IReadOnlyList<string> PendingCores);

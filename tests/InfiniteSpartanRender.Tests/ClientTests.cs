@@ -47,6 +47,22 @@ public class ClientTests
     }
 
     [Test]
+    public async Task GetCatalog_ReadsCoresPiecesCoatingsAndVisors()
+    {
+        var stub = new Stub((_, _) => Reply(HttpStatusCode.OK, """{"cores":[{"name":"Mark VII","regions":[{"kind":"KIT","key":"helmet","region":-5,"pieces":[{"permutation":7,"name":null}]}]}],"coatings":["-1"],"visors":["V"],"pendingCores":["Yoroi"]}"""));
+
+        var catalog = await ClientFor(stub).GetCatalogAsync();
+
+        var region = catalog.Cores.Single().Regions.Single();
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(stub.Requests.Single().Path, Is.EqualTo("/catalog"));
+            Assert.That((region.Kind, region.Key, region.Region, region.Pieces.Single()), Is.EqualTo(("KIT", "helmet", -5, new SpartanCatalogPiece(7, null))));
+            Assert.That((catalog.Coatings, catalog.Visors, catalog.PendingCores), Is.EqualTo((new[] { "-1" }, new[] { "V" }, new[] { "Yoroi" })));
+        }
+    }
+
+    [Test]
     public void ABadLoadout_ThrowsWithTheApisMessage()
     {
         var stub = new Stub((_, _) => Reply(HttpStatusCode.BadRequest, """{"error":"core must be one of: Mark VII"}"""));
