@@ -335,7 +335,9 @@ sc.cycles.use_denoising = True
 scale = 3 if full else 1
 sc.render.resolution_x = 700 * scale
 sc.render.resolution_y = (700 if framing == "head" else 1000) * scale
+sc.render.film_transparent = True
 sc.render.image_settings.file_format = "PNG"
+sc.render.image_settings.color_mode = "RGBA"
 sc.render.use_file_extension = False
 sc.render.filepath = out
 phase("scene")

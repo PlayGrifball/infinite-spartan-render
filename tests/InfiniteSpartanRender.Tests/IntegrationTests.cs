@@ -108,6 +108,25 @@ public class IntegrationTests
         var bytes = await File.ReadAllBytesAsync(output);
         Assert.That(bytes.AsSpan(0, 8).ToArray(), Is.EqualTo(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }), "PNG signature");
         Assert.That(bytes.Length, Is.GreaterThan(20_000), "a Spartan, not an empty frame");
+        Assert.That(CornerAlpha(bytes), Is.EqualTo(0), "the background is transparent");
+    }
+
+    // Alpha of the top-left pixel of an 8-bit RGBA PNG. On the first row every filter predicts from zeros, so the stored bytes are the pixel.
+    private static int CornerAlpha(byte[] png)
+    {
+        Assert.That((bytes: png[24], type: png[25]), Is.EqualTo((bytes: (byte)8, type: (byte)6)), "8-bit RGBA");
+        using var idat = new MemoryStream();
+        for (var at = 8; at + 8 <= png.Length;)
+        {
+            var length = (png[at] << 24) | (png[at + 1] << 16) | (png[at + 2] << 8) | png[at + 3];
+            if (System.Text.Encoding.ASCII.GetString(png, at + 4, 4) == "IDAT") idat.Write(png, at + 8, length);
+            at += 12 + length;
+        }
+        idat.Position = 0;
+        using var inflate = new System.IO.Compression.ZLibStream(idat, System.IO.Compression.CompressionMode.Decompress);
+        var first = new byte[5];
+        inflate.ReadExactly(first);
+        return first[4];
     }
 
     [Test]
@@ -170,6 +189,8 @@ public class IntegrationTests
         await _runner.RunAsync(new Loadout { Core = "Mark VII", Framing = "head", Stance = 39388885 }, output, CancellationToken.None);
 
         Keep(output);
-        Assert.That((await File.ReadAllBytesAsync(output)).Length, Is.GreaterThan(20_000));
+        var bytes = await File.ReadAllBytesAsync(output);
+        Assert.That(bytes.Length, Is.GreaterThan(20_000));
+        Assert.That(CornerAlpha(bytes), Is.EqualTo(0), "the background is transparent");
     }
 }

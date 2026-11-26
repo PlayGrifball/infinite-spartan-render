@@ -49,6 +49,8 @@ default piece; `coating` left out gets the default coating.
 | small | 700x1000, 48 samples   | textures at most 1024 px  |
 | full  | 2100x3000, 128 samples | original textures         |
 
+A PNG has a transparent background (RGBA); the scene is still lit by the grey world.
+
 ## Settings (`Render:` section / `Render__X` environment)
 
 `BlenderPath`, `ScriptPath`, `CacheDirectory` (`/cache`), `WorkDirectory` (`/tmp/render`), `MaxConcurrentJobs` (1; a
