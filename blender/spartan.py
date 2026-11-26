@@ -1,4 +1,5 @@
 # Run by Blender: blender -b --python spartan.py -- loadout.json output-path
+import hashlib
 import importlib
 import os
 import json
@@ -45,12 +46,37 @@ bpy.context.preferences.addons[MOD].preferences.data_folder = DATA
 ext = Path(bpy.utils.extension_path_user(MOD, create=True)) / "regions_and_permutations.json"
 if not ext.exists():
     shutil.copy(f"{EKUR_ASSETS}/regions_and_permutations.json", ext)
+
+
+def import_core():
+    # Importing a core takes minutes and does not depend on the loadout or the stance: keep the imported scene.
+    cache = os.environ.get("ISR_IMPORT_CACHE")
+    cached = None
+    if cache:
+        manifest = Path(importlib.import_module(MOD).__file__).parent / "blender_manifest.toml"
+        version = manifest.read_text() if manifest.exists() else ""
+        key = hashlib.sha256("\n".join([core, bpy.app.version_string, version]).encode()).hexdigest()[:16]
+        cached = Path(cache) / f"{re.sub(r'[^a-z0-9]+', '-', core.lower()).strip('-')}-{key}.blend"
+        if cached.exists():
+            bpy.ops.wm.open_mainfile(filepath=str(cached), load_ui=False)
+            os.utime(cached)
+            print("IMPORT reused", cached.name, flush=True)
+            return
+    o = bpy.context.scene.spartan_properties
+    o.import_specific_core = True
+    o.core = core
+    o.use_purp_rig = False
+    bpy.ops.ekur.importspartan()
+    if cached:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        part = cached.with_name(f"{cached.name}.{os.getpid()}.part")
+        bpy.ops.wm.save_as_mainfile(filepath=str(part), copy=True)
+        os.replace(part, cached)
+        print("IMPORT saved", cached.name, flush=True)
+
+
+import_core()
 sc = bpy.context.scene
-o = sc.spartan_properties
-o.import_specific_core = True
-o.core = core
-o.use_purp_rig = False
-bpy.ops.ekur.importspartan()
 phase("import")
 
 

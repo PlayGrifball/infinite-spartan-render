@@ -27,6 +27,7 @@ public class IntegrationTests
         {
             ScriptPath = Path.Combine(dir!.FullName, "blender", "spartan.py"),
             WorkDirectory = Path.Combine(_work, "render"),
+            CacheDirectory = Path.Combine(_work, "cache"),
             TimeoutSeconds = 1800,
         }));
     }
@@ -80,6 +81,10 @@ public class IntegrationTests
     public void TearDown()
     {
         WriteTimings();
+        // Three tests render Mark VII: the first imports it (minutes), the others open the saved import.
+        double[] imports;
+        lock (_phases) imports = _phases.Where(p => p.Phase == "import" && !p.Test.Contains("Yoroi") && !p.Test.Contains("WithoutABodyType")).Select(p => p.Seconds).ToArray();
+        if (imports.Length == 3) Assert.That(imports.Count(s => s < 60), Is.GreaterThanOrEqualTo(2), "a core's import is reused: " + string.Join(", ", imports));
         if (_work.Length > 0 && Directory.Exists(_work)) Directory.Delete(_work, recursive: true);
     }
 

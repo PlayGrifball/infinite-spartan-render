@@ -75,6 +75,10 @@ Licensed MIT; Ekur is GPL-3.0 and is fetched at image build time.
 - **Client address**: behind a proxy, set `ForwardedHeaders:KnownIPNetworks` (or `KnownProxies`, `ForwardedForHeaderName`) so the submit rate limit counts real clients.
 - **Helm chart**: `charts/infinite-spartan-render` (one replica, Recreate, read-only root, the game data PVC mounted read-only at `/data`, a cache PVC, NetworkPolicy, Traefik IngressRoute, PrometheusRule). CI lints, unit-tests and schema-checks it.
 
+Importing a core takes minutes and does not depend on the loadout or stance, so the imported scene is saved as
+`<cache>/imports/<core>-<key>.blend` (the key covers the core, Blender and the Ekur manifest) and later jobs for that
+core open it. A changed game data folder needs `imports/` cleared; files unused for `CacheDays` are swept.
+
 The stance is a Halo animation: a player's `actionPosePath` item (gateway `gamecms/item`) carries a `StanceId`, and
 the file `anim_<StanceId>_*.ekuranim` must be in `<data folder>/stances/`. A GLB is the posed mesh baked
 to a static model (no skeleton).
