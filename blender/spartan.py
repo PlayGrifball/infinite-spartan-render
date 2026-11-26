@@ -42,6 +42,16 @@ def region_key(col):
     return name.split("_", 1)[1] if "_" in name else name
 
 
+PLACEHOLDER = re.compile(r"\d{3}-\d{3}-[a-z]+-[0-9a-f]{8}")
+
+
+def default_permutation(objs, core):
+    # Placeholder boxes (24 vertices, no material) sort before the real pieces; skip them.
+    real = [x for x in objs if not HASHED.fullmatch(x.name) and not PLACEHOLDER.search(x.name)] or objs
+    named = next((x for x in real if x.name.split(".")[0].lower().endswith("_" + core.lower())), None)
+    return named or real[0]
+
+
 keep = []
 for col in bpy.data.collections:
     if not col.name.startswith("[REGION]"):
@@ -57,7 +67,8 @@ for col in bpy.data.collections:
     chosen = next((x for x in objs if wanted and x.name.split(".")[0].endswith("_" + wanted)), None)
     if wanted and chosen is None:
         sys.exit(f"No permutation '{wanted}' in region '{region_key(col)}'")
-    keep.append(chosen or objs[0])
+    chosen = chosen or default_permutation(objs, core)
+    keep.append(chosen)
 
 unknown = set(armor) - {region_key(c) for c in bpy.data.collections if c.name.startswith("[REGION]")}
 if unknown:
