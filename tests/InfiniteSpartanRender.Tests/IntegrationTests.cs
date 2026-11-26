@@ -154,6 +154,8 @@ public class IntegrationTests
             baked = second.Where(p => p.Phase == "bake").Sum(p => p.Seconds);
             reused = second.Where(p => p.Phase == "bake_reused").Sum(p => p.Seconds);
         }
+        Keep(posed);
+        Keep(neutral);
         Assert.That(baked, Is.EqualTo(0), "the second GLB bakes nothing");
         Assert.That(reused, Is.GreaterThan(0), "and loads the first one's textures");
         Assert.That(System.Text.Encoding.ASCII.GetString(await File.ReadAllBytesAsync(neutral), 0, 4), Is.EqualTo("glTF"));
