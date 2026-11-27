@@ -57,10 +57,10 @@ public sealed record SpartanSetRequest
     public string Size { get; init; } = "small";
 }
 
-/// <summary>One of the six files of a set: <see cref="Name"/> is stance-glb, stance-body, stance-head, neutral-glb, neutral-body or neutral-head.</summary>
+/// <summary>One of the five files of a set: <see cref="Name"/> is glb, stance-body, stance-head, neutral-body or neutral-head.</summary>
 public sealed record SpartanSetItem(string Name, string State, string Output, string Url);
 
-/// <summary>A set's state is the worst of its six items: failed, else done when all are, else running or queued.</summary>
+/// <summary>A set's state is the worst of its five items: failed, else done when all are, else running or queued.</summary>
 public sealed record SpartanSet(string Id, string State, IReadOnlyList<SpartanSetItem> Items)
 {
     public bool IsDone => State == "done";

@@ -30,7 +30,7 @@ var job = await client.SubmitAsync(new SpartanLoadout { Core = "Yoroi", Output =
 job = await client.WaitAsync(job);
 var glb = await client.GetFileAsync(job.Id);
 
-// A whole Spartan in a stance and in the neutral one: six files
+// A whole Spartan in a stance and in the neutral one: five files (body and head in each pose, one rigged GLB)
 var set = await client.SubmitSetAsync(new SpartanSetRequest { Core = "Mark VII", Stance = 39388885 });
 set = await client.WaitAsync(set);
 foreach (var item in set.Items) File.WriteAllBytes($"{item.Name}.{item.Output}", await client.GetFileAsync(item));

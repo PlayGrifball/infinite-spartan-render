@@ -203,8 +203,8 @@ public class ApiTests
 
         Assert.That(set.GetProperty("state").GetString(), Is.EqualTo("done"));
         var items = set.GetProperty("items").EnumerateArray().ToDictionary(i => i.GetProperty("name").GetString()!);
-        Assert.That(items.Keys, Is.EquivalentTo(new[] { "stance-glb", "neutral-glb", "stance-body", "stance-head", "neutral-body", "neutral-head" }));
-        Assert.That(items.Values.Select(i => i.GetProperty("url").GetString()).Distinct().Count(), Is.EqualTo(6));
+        Assert.That(items.Keys, Is.EquivalentTo(new[] { "glb", "stance-body", "stance-head", "neutral-body", "neutral-head" }));
+        Assert.That(items.Values.Select(i => i.GetProperty("url").GetString()).Distinct().Count(), Is.EqualTo(5));
         foreach (var item in items.Values)
             Assert.That((await _client.GetAsync(item.GetProperty("url").GetString())).StatusCode, Is.EqualTo(HttpStatusCode.OK));
         Assert.That(_runner.Calls, Is.EqualTo(6));
@@ -236,9 +236,9 @@ public class ApiTests
         var id = (await (await _client.PostAsJsonAsync("/spartan-sets", SetBody(5))).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
         await SetWhenDone(id);
 
-        Assert.That(_runner.Loadouts.Count(l => l.Stance is null), Is.EqualTo(3));
+        Assert.That(_runner.Loadouts.Count(l => l.Stance is null), Is.EqualTo(2));
         Assert.That(_runner.Loadouts.Count(l => l.Stance == 5), Is.EqualTo(3));
-        Assert.That(_runner.Loadouts.Count(l => l.Output == "glb"), Is.EqualTo(2));
+        Assert.That(_runner.Loadouts.Count(l => l.Output == "glb"), Is.EqualTo(1));
         Assert.That(_runner.Loadouts.Count(l => l.Framing == "head"), Is.EqualTo(2));
     }
 

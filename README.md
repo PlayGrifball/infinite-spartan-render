@@ -36,10 +36,10 @@ POST /spartan-sets
 { "core": "Mark VII", "armor": {}, "coating": "1120495519", "stance": 39388885, "size": "small" }   // stance is required
 -> 202 { "id", "state", "items": [ { "name", "state", "output", "url" } ] }
 
-GET /spartan-sets/{id}    -> the same; state is the worst of the six: failed, else done when all are, else running or queued
+GET /spartan-sets/{id}    -> the same; state is the worst of the five: failed, else done when all are, else running or queued
 ```
 
-The six items are `stance-glb`, `stance-body`, `stance-head`, `neutral-glb`, `neutral-body` and `neutral-head`; each
+The five items are `glb`, `stance-body`, `stance-head`, `neutral-body` and `neutral-head`; the GLB is one skinned model with the game rig and two animation clips, `neutral` and `stance`, so anyone can pose it or add their own animations; each
 `url` is a `/spartans/{id}/file`. They are ordinary jobs (the same cache, queue and limits), so a set whose pieces were
 rendered before costs nothing, and a GLB takes minutes. Sets, like jobs, do not survive a restart: post again.
 
