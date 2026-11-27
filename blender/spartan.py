@@ -254,8 +254,19 @@ missing = set()
 problems = []
 
 
-def apply_materials(applied):
-    rig.apply_materials(mo.get_materials(), DATA, mo, lambda p: ju.read_json_file(p, jd.CommonMaterial), applied, missing, problems)
+def apply_materials(applied, unknown=None):
+    rig.apply_materials(mo.get_materials(), DATA, mo, lambda p: ju.read_json_file(p, jd.CommonMaterial), applied, missing, problems, unknown)
+
+
+def glow(material):
+    # A shader Ekur's dump lacks (energy blades, holograms) would render as an empty black material: draw it as a pale plasma glow
+    tree = material.node_tree
+    tree.nodes.clear()
+    out = tree.nodes.new("ShaderNodeOutputMaterial")
+    emit = tree.nodes.new("ShaderNodeEmission")
+    emit.inputs["Color"].default_value = (0.45, 0.75, 1.0, 1.0)
+    emit.inputs["Strength"].default_value = 4.0
+    tree.links.new(emit.outputs["Emission"], out.inputs["Surface"])
 
 
 apply_materials(done)
@@ -277,8 +288,10 @@ if weapon:
     mp.use_default_coating = not weapon_coating
     mp.coating_id = weapon_coating
     mp.override_visor = False
-    weapon_done = set()
-    apply_materials(weapon_done)
+    weapon_done, weapon_unknown = set(), set()
+    apply_materials(weapon_done, weapon_unknown)
+    for material in {s.material for x in weapon_objs for s in x.material_slots if s.material and s.material.name.split(".")[0] in weapon_unknown}:
+        glow(material)
     done |= weapon_done
     print("WEAPON", weapon, model.name, len(weapon_objs), "meshes", flush=True)
 print("MATS", len(done), "missing", sorted(missing))

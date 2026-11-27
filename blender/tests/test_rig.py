@@ -375,3 +375,15 @@ def test_a_models_markers_are_read_in_metres_from_their_first_instance():
 
     assert list(markers) == ["left_hand_spartan"]
     assert close(markers["left_hand_spartan"][0], (0.1 * rig.UNIT, 0, 0))
+
+
+def test_a_material_whose_shader_was_not_extracted_is_reported_so_it_can_be_drawn_some_other_way(tmp_path):
+    (tmp_path / "materials").mkdir()
+    for name in ("21", "22"):
+        (tmp_path / "materials" / f"{name}.json").write_text("{}")
+    reads = {"21": {"shader_type": "Unknown"}, "22": {"shader_type": "Layered"}}
+    unknown = set()
+
+    rig.apply_materials([slot("21"), slot("22")], tmp_path, FakeMaterials(), lambda p: reads[p.stem], set(), set(), [], unknown)
+
+    assert unknown == {"21"}

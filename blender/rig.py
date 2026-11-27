@@ -92,14 +92,14 @@ def add_visibility_clips(objects, shown, new_action):
         obj.scale = scale
 
 
-def apply_materials(slots, data, mo, read_material, done, missing, problems):
+def apply_materials(slots, data, mo, read_material, done, missing, problems, unknown=None):
     # Ekur's material import of the selected objects, one material at a time: its own operator stops at the first missing JSON.
     for slot in slots:
         if slot.material and slot.material.node_tree:
-            _apply_material(slot, Path(data), mo, read_material, done, missing, problems)
+            _apply_material(slot, Path(data), mo, read_material, done, missing, problems, unknown)
 
 
-def _apply_material(slot, data, mo, read_material, done, missing, problems):
+def _apply_material(slot, data, mo, read_material, done, missing, problems, unknown):
     name = slot.name.split(".")[0]
     if name in done or name in missing:
         return
@@ -115,6 +115,9 @@ def _apply_material(slot, data, mo, read_material, done, missing, problems):
     if material is None:
         problems.append(f"material {name}: unreadable JSON")
         return
+    # Ekur's dump has no shader for these (plasma blades, holograms): Ekur builds nothing, so the caller draws them
+    if unknown is not None and material.get("shader_type") == "Unknown":
+        unknown.add(name)
     try:
         mo.run_material(material, slot.material.node_tree)
     except Exception as e:
