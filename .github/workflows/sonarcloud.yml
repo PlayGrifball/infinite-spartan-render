@@ -53,7 +53,8 @@ jobs:
       - name: Install scanner
         run: dotnet tool install --global dotnet-sonarscanner --version "$SONAR_SCANNER_VERSION"
 
-      # The Python script is analysed too (scanAll); the integration tests need Blender and skip here.
+      # The Python is analysed too (scanAll); its rig and export helpers have pytest coverage (blender/tests). The
+      # integration tests need Blender and skip here.
       - name: Begin analysis
         run: >
           dotnet sonarscanner begin
@@ -62,6 +63,7 @@ jobs:
           /d:sonar.token="$SONAR_TOKEN"
           /d:sonar.host.url=https://sonarcloud.io
           /d:sonar.scanner.scanAll=true
+          /d:sonar.python.coverage.reportPaths=coverage.xml
           /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml"
 
       - name: Build
@@ -78,6 +80,13 @@ jobs:
           --collect:"XPlat Code Coverage"
           --settings coverlet.runsettings
           -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+      - name: Test the Blender script's helpers
+        continue-on-error: true
+        run: |
+          python3 -m venv "$RUNNER_TEMP/py"
+          "$RUNNER_TEMP/py/bin/pip" install --quiet pytest==8.4.2 pytest-cov==7.0.0
+          "$RUNNER_TEMP/py/bin/pytest" blender/tests --cov=blender --cov-report=xml:coverage.xml
 
       - name: End analysis
         run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"

@@ -22,6 +22,11 @@ jobs:
         with:
           global-json-file: global.json
       - run: dotnet test InfiniteSpartanRender.slnx -c Release --collect:"XPlat Code Coverage"
+      # The Blender script's rig and export helpers take Blender as an argument, so they test without it.
+      - run: |
+          python3 -m venv "$RUNNER_TEMP/py"
+          "$RUNNER_TEMP/py/bin/pip" install --quiet pytest==8.4.2
+          "$RUNNER_TEMP/py/bin/pytest" blender/tests
 
   # Real Blender and Ekur renders on the in-cluster runner, which mounts the same trimmed game data the service
   # uses at /data (homelab arc-infinite-spartan-render). Never for pull requests from forks: the data is private.

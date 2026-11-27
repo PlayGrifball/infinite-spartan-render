@@ -13,6 +13,9 @@ import addon_utils
 import bpy
 import mathutils
 
+sys.path.insert(0, str(Path(sys.argv[sys.argv.index("--python") + 1]).resolve().parent))
+import rig  # noqa: E402
+
 DATA = os.environ.get("ISR_DATA", "/data")
 EKUR_ASSETS = "/opt/ekur/assets"
 DEFAULT_STANCE = -1258174396
@@ -282,25 +285,15 @@ for x in keep:
             m.object = armature
 anim_data = importlib.import_module(MOD + ".src.model.importer.animation.anim_data")
 anim_import = importlib.import_module(MOD + ".src.model.importer.animation.importer")
+
+
 def load_clip(path, name):
-    a = anim_data.AnimationData()
-    with open(path, "rb") as fh:
-        a.read(fh)
-    a.frames, a.total_frames = a.frames[:1], 1
-    return anim_import.import_animation(armature, a, name)
+    return rig.read_clip(anim_data, anim_import, armature, path, name)
 
 
 if output == "glb":
     neutral_path = next(iter(sorted((Path(DATA) / "stances").glob(f"anim_{DEFAULT_STANCE}_*.ekuranim"))), None)
-    ad = armature.animation_data_create()
-    for name, path in (("neutral", neutral_path), ("stance", stance_path)):
-        act = load_clip(path, name)
-        track = ad.nla_tracks.new()
-        track.name = name
-        track.strips.new(name, 1, act)
-        ad.action = None
-    for pb in armature.pose.bones:
-        pb.location = (0, 0, 0); pb.rotation_quaternion = (1, 0, 0, 0); pb.scale = (1, 1, 1)
+    rig.add_pose_clips(armature, (("neutral", neutral_path), ("stance", stance_path)), load_clip)
 else:
     load_clip(stance_path, "stance")
 sc.frame_set(1)
@@ -400,17 +393,11 @@ def bake_to_plain_materials(size):
 
 
 if output == "glb":
-    for x in keep:
-        for m in x.modifiers:
-            if m.type == "ARMATURE":
-                m.show_viewport = True
+    rig.show_armature_modifiers(keep)
     bpy.context.view_layer.update()
     phase("mesh")
     bake_to_plain_materials(2048 if full else 1024)
-    for x in keep:
-        x.select_set(True)
-    armature.select_set(True)
-    bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", use_selection=True, export_apply=True, export_skins=True, export_animations=True, export_animation_mode="NLA_TRACKS", export_image_format="JPEG", export_jpeg_quality=85)
+    rig.export_glb(bpy.ops.export_scene.gltf, out, keep, armature)
     phase("export")
     sys.exit(0)
 
