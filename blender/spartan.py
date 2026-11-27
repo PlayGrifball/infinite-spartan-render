@@ -240,8 +240,13 @@ if visor:
     options.visor_cache = [(n, n, "") for n in names]
     mp.override_visor = True
     mp.visor = visor
+    # The material code reads the same file from the extension folder too and, when it is missing, silently keeps the coating's own visor
+    visor_shader = importlib.import_module(MOD + ".src.material_types.layered_shader")
+    read_ekur_json = visor_shader.read_json_file
+    visor_shader.read_json_file = lambda path, T: read_ekur_json(
+        Path(f"{EKUR_ASSETS}/all_visors.json") if Path(path).name == "all_visors.json" else path, T)
 
-mo = importlib.import_module(MOD + ".src.operators.material_operator")
+mo =importlib.import_module(MOD + ".src.operators.material_operator")
 ju = importlib.import_module(MOD + ".src.utils")
 jd = importlib.import_module(MOD + ".src.json_definitions")
 done = set()
