@@ -663,7 +663,7 @@ public class LoadoutTests
     }
 
     [Test]
-    public void ASetPassesItsPartsToEverySixItems()
+    public void ASetPassesItsPartsToEveryItem()
     {
         var set = new SpartanSetRequest { Core = "x", Stance = 7, Parts = new() { new(1, 2) } };
 

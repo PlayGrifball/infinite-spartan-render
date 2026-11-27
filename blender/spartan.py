@@ -35,6 +35,7 @@ core = loadout["Core"]
 armor = loadout.get("Armor") or {}
 coating = loadout.get("Coating") or ""
 visor = loadout.get("Visor") or ""
+disable_damage = bool(loadout.get("DisableDamage"))
 parts = {int(p["Region"]): int(p["Permutation"]) for p in (loadout.get("Parts") or [])}
 output = loadout.get("Output", "png")
 full = loadout.get("Size") == "full"
@@ -225,6 +226,7 @@ for x in keep:
 
 mp = sc.material_properties
 mp.selected_only = True
+mp.disable_damage = disable_damage
 if coating:
     mp.use_default_coating = False
     mp.coating_id = coating
@@ -311,7 +313,7 @@ def bake_folder(size):
     if not cache:
         return None
     renderer = hashlib.sha256(Path(sys.argv[sys.argv.index("--python") + 1]).read_bytes()).hexdigest()
-    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, visor, size], sort_keys=True)
+    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, visor, disable_damage, size], sort_keys=True)
     return Path(cache) / hashlib.sha256(ident.encode()).hexdigest()[:32]
 
 

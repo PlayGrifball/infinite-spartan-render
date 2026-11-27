@@ -13,6 +13,7 @@ public sealed record SpartanSetRequest
     public List<PartId>? Parts { get; init; } = new();
     public string? Coating { get; init; }
     public string? Visor { get; init; }
+    public bool DisableDamage { get; init; }
     // A StanceId from a player's action pose item.
     public int? Stance { get; init; }
     public string Size { get; init; } = "small";
@@ -24,11 +25,11 @@ public sealed record SpartanSetRequest
         var items = new List<(string, Loadout)>();
         foreach (var (pose, stance) in new[] { ("stance", chosen), ("neutral", (int?)null) })
         {
-            var basis = new Loadout { Core = Core, Armor = Armor, Parts = Parts, Coating = Coating, Visor = Visor, Size = Size, Stance = stance };
+            var basis = new Loadout { Core = Core, Armor = Armor, Parts = Parts, Coating = Coating, Visor = Visor, DisableDamage = DisableDamage, Size = Size, Stance = stance };
             items.Add(($"{pose}-body", basis with { Output = "png", Framing = "body" }));
             items.Add(($"{pose}-head", basis with { Output = "png", Framing = "head" }));
         }
-        items.Add(("glb", new Loadout { Core = Core, Armor = Armor, Parts = Parts, Coating = Coating, Visor = Visor, Size = Size, Stance = chosen, Output = "glb" }));
+        items.Add(("glb", new Loadout { Core = Core, Armor = Armor, Parts = Parts, Coating = Coating, Visor = Visor, DisableDamage = DisableDamage, Size = Size, Stance = chosen, Output = "glb" }));
         return items;
     }
 

@@ -21,6 +21,9 @@ public sealed record SpartanLoadout
     /// <summary>A visor title from the catalog's <c>visors</c>; null or empty is the core's default visor.</summary>
     public string? Visor { get; init; }
 
+    /// <summary>Leaves out the 7th or 4th material zone, the layer of grime and wear on armor, for a cleaner look.</summary>
+    public bool DisableDamage { get; init; }
+
     /// <summary><c>png</c> or <c>glb</c>.</summary>
     public string Output { get; init; } = "png";
 
@@ -50,6 +53,8 @@ public sealed record SpartanSetRequest
     public string? Coating { get; init; }
     /// <summary>A visor title from the catalog; null or empty is the core's default visor.</summary>
     public string? Visor { get; init; }
+    /// <summary>Leaves out the grime and wear zone, for a cleaner look.</summary>
+    public bool DisableDamage { get; init; }
 
     /// <summary>A StanceId from a player's action pose item (required by the API).</summary>
     public required int Stance { get; init; }
