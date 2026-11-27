@@ -1,0 +1,20 @@
+[
+  {"weapon": "MA40 Assault Rifle", "stance": -1676108826, "pose": "Act of Genesis"},
+  {"weapon": "Mk50 Sidekick", "stance": 1253919780, "pose": "Agent 117"},
+  {"weapon": "M41 Rocket Launcher", "stance": 1516392748, "pose": "Boom Box"},
+  {"weapon": "VK78 Commando Rifle", "stance": 1756613951, "pose": "Noble Command"},
+  {"weapon": "Energy Sword", "stance": -1420523120, "pose": "Captain's Pride"},
+  {"weapon": "BR75 Battle Rifle", "stance": 20815899, "pose": "Claw Patrol"},
+  {"weapon": "Energy Sword", "stance": 241202609, "pose": "Clean Cut"},
+  {"weapon": "S7 Sniper Rifle", "stance": -1754372666, "pose": "Fossil Tree"},
+  {"weapon": "CQS48 Bulldog", "stance": 259700238, "pose": "Noble Fury"},
+  {"weapon": "M247 HMG", "stance": -404535920, "pose": "Noble Justice"},
+  {"weapon": "Gravity Hammer", "stance": -1887947697, "pose": "Ruthless War Club"},
+  {"weapon": "MLRS-2 Hydra", "stance": -1624320584, "pose": "Stay Hydrated"},
+  {"weapon": "Disruptor", "stance": 1619297766, "pose": "Set Breakpoint"},
+  {"weapon": "Sentinel Beam", "stance": -1285086641, "pose": "Beam Weaver"},
+  {"weapon": "Skewer", "stance": -1459612436, "pose": "Skewed Perspective"},
+  {"weapon": "Stalker Rifle", "stance": -1927277389, "pose": "Overmatch"},
+  {"weapon": "Shock Rifle", "stance": -223225840, "pose": "Craig Cover Band"},
+  {"weapon": "Needler", "stance": 998587322, "pose": "Field Analyst"}
+]

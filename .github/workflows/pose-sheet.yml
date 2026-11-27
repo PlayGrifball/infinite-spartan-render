@@ -1,0 +1,51 @@
+# Renders every weapon of blender/weapon-poses.json in a pose that holds it and lays them out in one sheet, to check by
+# eye that each sits in the hands before a change to the weapon code merges. Half an hour or more on the in-cluster
+# runner, so it runs only when asked: add the pose-sheet label to a PR (each new label adds a run), or Actions > Pose
+# sheet > Run workflow once this file is on main.
+name: Pose sheet
+
+on:
+  pull_request:
+    types: [labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pose-sheet-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  poses:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.label.name == 'pose-sheet' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: infinite-spartan-render-k8s
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Render the poses
+        run: |
+          ISR_IMPORT_CACHE="$RUNNER_TEMP/imports" ISR_BAKE_CACHE="$RUNNER_TEMP/bakes" \
+            /opt/blender/blender -b --factory-startup --python blender/pose_sheet.py -- poses
+      - name: Legend
+        if: ${{ !cancelled() && hashFiles('poses/sheet.md') != '' }}
+        run: |
+          {
+            echo "### Weapon poses (${GITHUB_SHA:0:7})"
+            echo
+            echo "The sheet is the \`sheet.png\` artifact, read left to right, top to bottom:"
+            echo
+            cat poses/sheet.md
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Unzipped, so it opens in the browser
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && hashFiles('poses/sheet.png') != '' }}
+        with:
+          path: poses/sheet.png
+          archive: false
+          retention-days: 30
+          overwrite: true

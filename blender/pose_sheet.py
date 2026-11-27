@@ -1,0 +1,74 @@
+# Run by Blender: blender -b --python pose_sheet.py -- out-dir
+# Renders each weapon of weapon-poses.json in a pose that holds it, then lays the renders out in one sheet (sheet.png)
+# with a numbered legend (sheet.md), to check by eye that every weapon sits in the hands.
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+COLUMNS = 6
+CELL = (350, 500)
+
+
+def loadouts(poses):
+    for pose in poses:
+        yield {"Core": "Mark VII", "Stance": pose["stance"], "Framing": "body", "Output": "png", "Size": "small", "Weapon": pose["weapon"]}
+
+
+def command(blender, loadout_path, png):
+    return [blender, "-b", "--factory-startup", "--python", str(HERE / "spartan.py"), "--", str(loadout_path), str(png)]
+
+
+def layout(count, columns=COLUMNS):
+    # Each render's cell (column, row from the top), and the sheet's size in cells
+    return [(i % columns, i // columns) for i in range(count)], (min(count, columns), (count + columns - 1) // columns)
+
+
+def legend(poses):
+    return "\n".join(f"{i + 1}. {pose['weapon']} in {pose['pose']}" for i, pose in enumerate(poses)) + "\n"
+
+
+def compose(pngs, out):
+    import bpy
+    import numpy as np
+
+    cells, (columns, rows) = layout(len(pngs))
+    w, h = CELL
+    canvas = np.zeros((rows * h, columns * w, 4), dtype=np.float32)
+    canvas[..., :3], canvas[..., 3] = 0.18, 1
+    for png, (column, row) in zip(pngs, cells):
+        if not png.exists():
+            continue
+        image = bpy.data.images.load(str(png))
+        image.scale(w, h)
+        pixels = np.array(image.pixels[:], dtype=np.float32).reshape(h, w, 4)
+        cell = canvas[(rows - 1 - row) * h:(rows - row) * h, column * w:(column + 1) * w]
+        alpha = pixels[..., 3:4]
+        cell[..., :3] = pixels[..., :3] * alpha + cell[..., :3] * (1 - alpha)
+    sheet = bpy.data.images.new("sheet", columns * w, rows * h, alpha=True)
+    sheet.pixels = canvas.ravel().tolist()
+    sheet.filepath_raw, sheet.file_format = str(out), "PNG"
+    sheet.save()
+
+
+def main():
+    import bpy
+
+    out = Path(sys.argv[sys.argv.index("--") + 1])
+    out.mkdir(parents=True, exist_ok=True)
+    poses = json.loads((HERE / "weapon-poses.json").read_text())
+    pngs = []
+    for i, loadout in enumerate(loadouts(poses)):
+        loadout_path, png = out / f"{i + 1:02d}.json", out / f"{i + 1:02d}.png"
+        loadout_path.write_text(json.dumps(loadout))
+        done = subprocess.run(command(bpy.app.binary_path, loadout_path, png), env=os.environ, capture_output=True, text=True)
+        print(f"{i + 1:02d} {loadout['Weapon']}: {'ok' if done.returncode == 0 else 'failed ' + done.stdout[-300:]}", flush=True)
+        pngs.append(png)
+    compose(pngs, out / "sheet.png")
+    (out / "sheet.md").write_text(legend(poses))
+
+
+if __name__ == "__main__":
+    main()
