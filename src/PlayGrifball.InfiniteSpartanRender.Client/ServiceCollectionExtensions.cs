@@ -28,5 +28,6 @@ public static class ServiceCollectionExtensions
                 ?? throw new InvalidOperationException("Set the Infinite Spartan Render client's BaseAddress.");
             // A file can be a full-size GLB, and waiting is done by polling, so no single call is long.
             http.Timeout = TimeSpan.FromMinutes(5);
+            if (!string.IsNullOrWhiteSpace(options.ApiKey)) http.DefaultRequestHeaders.Add("X-Api-Key", options.ApiKey.Trim());
         });
 }
