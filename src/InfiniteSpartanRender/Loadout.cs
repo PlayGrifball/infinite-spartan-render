@@ -50,12 +50,14 @@ public sealed record Loadout
         if (!string.IsNullOrEmpty(Coating) && !CoatingId.IsMatch(Coating)) return "coating must be a numeric coating id";
         if (!string.IsNullOrEmpty(Visor) && visors is not null && !visors.Contains(Visor)) return "visor must be a title from the catalog";
         if (WeaponProblem(weapons) is { } weapon) return weapon;
+        return ShapeProblem() ?? PosesProblem(poses) ?? ModelProblem(weapons);
+    }
+
+    private string? ShapeProblem()
+    {
         if (Output is not ("png" or "glb")) return "output must be png or glb";
         if (Size is not ("small" or "full")) return "size must be small or full";
-        if (Framing is not ("body" or "head")) return "framing must be body or head";
-        if (PosesProblem(poses) is { } extra) return extra;
-        if (ModelProblem(weapons) is { } model) return model;
-        return null;
+        return Framing is not ("body" or "head") ? "framing must be body or head" : null;
     }
 
     private string? PosesProblem(IReadOnlyCollection<CatalogPose>? poses)

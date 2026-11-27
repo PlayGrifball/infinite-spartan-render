@@ -359,9 +359,11 @@ public class ApiTests
         async Task<(string? Model, string? Extra)> IdsAsync()
         {
             async Task<string?> IdOf(object body) => (await (await _client.PostAsJsonAsync("/spartans", body)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
-            return (await IdOf(Body(output: "glb")), await IdOf(new { core = "Mark VII", armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating = "1120495519", output = "glb", size = "small", extraPoses = new[] { 1 } }));
+            return (await IdOf(Body(output: "glb")), await IdOf(new { core = "Mark VII", armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating = "1120495519", output = "glb", size = "small", extraPoses = PoseOne }));
         }
     }
+
+    private static readonly int[] PoseOne = [1];
 
     private static object WithWeapon(string weapon) =>
         new { core = "Mark VII", armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating = "1120495519", output = "png", size = "small", weapon };
