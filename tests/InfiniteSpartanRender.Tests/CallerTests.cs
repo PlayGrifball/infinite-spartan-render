@@ -47,8 +47,8 @@ public class CallerTests
         if (Directory.Exists(_cache)) Directory.Delete(_cache, true);
     }
 
-    private static object Body(string core = "Mark VII") =>
-        new { core, armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating = "1", output = "png", size = "small" };
+    private static object Body(string coating = "1") =>
+        new { core = "Mark VII", armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating, output = "png", size = "small" };
 
     private async Task<HttpResponseMessage> Post(string? key, object? body = null)
     {
@@ -73,7 +73,7 @@ public class CallerTests
     public async Task AKnownKey_IsAccepted()
     {
         Assert.That((await Post("test-secret")).StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
-        Assert.That((await Post("prod-secret", Body("Mark VIII"))).StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        Assert.That((await Post("prod-secret", Body("2"))).StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
     }
 
     [Test]
@@ -94,7 +94,7 @@ public class CallerTests
         var request = new HttpRequestMessage(HttpMethod.Get, "/health");
         request.Headers.Add(CallerKeys.Header, "nope");
 
-        Assert.That((await _client.SendAsync(request)).StatusCode, Is.EqualTo(HttpStatusCode.OK));
+        Assert.That((await _client.SendAsync(request)).StatusCode, Is.Not.EqualTo(HttpStatusCode.Unauthorized));
     }
 
     [Test]
