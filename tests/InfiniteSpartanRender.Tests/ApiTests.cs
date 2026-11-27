@@ -193,7 +193,7 @@ public class ApiTests
     }
 
     [Test]
-    public async Task ASet_RendersTwoGlbsAndFourPngs_InTheStanceAndTheNeutralPose()
+    public async Task ASet_RendersOneGlbAndFourPngs_InTheStanceAndTheNeutralPose()
     {
         var response = await _client.PostAsJsonAsync("/spartan-sets", SetBody());
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
@@ -207,7 +207,7 @@ public class ApiTests
         Assert.That(items.Values.Select(i => i.GetProperty("url").GetString()).Distinct().Count(), Is.EqualTo(5));
         foreach (var item in items.Values)
             Assert.That((await _client.GetAsync(item.GetProperty("url").GetString())).StatusCode, Is.EqualTo(HttpStatusCode.OK));
-        Assert.That(_runner.Calls, Is.EqualTo(6));
+        Assert.That(_runner.Calls, Is.EqualTo(5));
     }
 
     [Test]
@@ -252,7 +252,7 @@ public class ApiTests
 
         Assert.That(again.GetProperty("id").GetString(), Is.EqualTo(id));
         Assert.That(again.GetProperty("state").GetString(), Is.EqualTo("done"));
-        Assert.That(_runner.Calls, Is.EqualTo(6));
+        Assert.That(_runner.Calls, Is.EqualTo(5));
     }
 
     [Test]
