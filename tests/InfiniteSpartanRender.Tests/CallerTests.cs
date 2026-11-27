@@ -72,8 +72,14 @@ public class CallerTests
     [Test]
     public async Task AKnownKey_IsAccepted()
     {
-        Assert.That((await Post("test-secret")).StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
-        Assert.That((await Post("prod-secret", Body("2"))).StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        var test = await Post("test-secret");
+        var prod = await Post("prod-secret", Body("2"));
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(test.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+            Assert.That(prod.StatusCode, Is.EqualTo(HttpStatusCode.Accepted));
+        }
     }
 
     [Test]
@@ -118,9 +124,12 @@ public class CallerTests
             render = spans.Single(a => a.OperationName == "render");
             request = spans.Single(a => a.Source.Name == "Microsoft.AspNetCore" && a.TraceId == render.TraceId && a.GetTagItem(CallerKeys.SpanTag) is not null);
         }
-        Assert.That(render.GetTagItem(CallerKeys.SpanTag), Is.EqualTo("grif-test"));
-        Assert.That(request.GetTagItem(CallerKeys.SpanTag), Is.EqualTo("grif-test"));
-        Assert.That(render.ParentSpanId, Is.EqualTo(request.SpanId));
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(render.GetTagItem(CallerKeys.SpanTag), Is.EqualTo("grif-test"));
+                    Assert.That(request.GetTagItem(CallerKeys.SpanTag), Is.EqualTo("grif-test"));
+                    Assert.That(render.ParentSpanId, Is.EqualTo(request.SpanId));
+        }
     }
 
     [Test]
