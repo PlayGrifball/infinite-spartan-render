@@ -106,3 +106,15 @@ def test_the_rest_pose_also_clears_euler_and_axis_angle_rotation():
 
     assert bones[0].rotation_euler == (0, 0, 0)
     assert bones[0].rotation_axis_angle == (0, 0, 1, 0)
+
+
+def test_glb_textures_are_small_enough_for_a_phone_unless_full():
+    assert rig.texture_size(False) == 512
+    assert rig.texture_size(True) == 2048
+
+
+def test_an_emission_map_with_no_light_in_it_is_skipped():
+    black = [0.0, 0.0, 0.0, 1.0] * 4
+    glowing = [0.0, 0.0, 0.0, 1.0] * 3 + [0.0, 0.2, 0.0, 1.0]
+    assert not rig.has_light(black)
+    assert rig.has_light(glowing)
