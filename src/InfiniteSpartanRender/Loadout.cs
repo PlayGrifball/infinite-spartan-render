@@ -1,3 +1,4 @@
+        if (WeaponProblem(weapons) is { } weapon) return weapon;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -42,13 +43,19 @@ public sealed record Loadout
         if (PiecesProblem() is { } pieces) return pieces;
         if (!string.IsNullOrEmpty(Coating) && !CoatingId.IsMatch(Coating)) return "coating must be a numeric coating id";
         if (!string.IsNullOrEmpty(Visor) && visors is not null && !visors.Contains(Visor)) return "visor must be a title from the catalog";
-        if (!string.IsNullOrEmpty(Weapon) && (Weapon.Length > 64 || (weapons is not null && !weapons.Contains(Weapon)))) return "weapon must be a name from the catalog";
-        if (!string.IsNullOrEmpty(WeaponCoating) && !CoatingId.IsMatch(WeaponCoating)) return "weapon coating must be a numeric coating id";
-        if (!string.IsNullOrEmpty(WeaponCoating) && string.IsNullOrEmpty(Weapon)) return "weapon coating needs a weapon";
+        if (WeaponProblem(weapons) is { } weapon) return weapon;
         if (Output is not ("png" or "glb")) return "output must be png or glb";
         if (Size is not ("small" or "full")) return "size must be small or full";
         if (Framing is not ("body" or "head")) return "framing must be body or head";
         return null;
+    }
+
+    private string? WeaponProblem(IReadOnlyCollection<string>? weapons)
+    {
+        if (!string.IsNullOrEmpty(Weapon) && (Weapon.Length > 64 || (weapons is not null && !weapons.Contains(Weapon)))) return "weapon must be a name from the catalog";
+        if (string.IsNullOrEmpty(WeaponCoating)) return null;
+        if (!CoatingId.IsMatch(WeaponCoating)) return "weapon coating must be a numeric coating id";
+        return string.IsNullOrEmpty(Weapon) ? "weapon coating needs a weapon" : null;
     }
 
     private string? PiecesProblem()

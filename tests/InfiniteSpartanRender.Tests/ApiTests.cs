@@ -550,6 +550,10 @@ public class ApiTests
         }
     }
 
+    private static readonly int[] CommandoTags = [-40348340];
+    private static readonly string[] CommandoCoatings = ["-2", "5", "9"];
+    private static readonly string[] JustTheSword = ["Energy Sword"];
+
     private static async Task<string> WeaponsFile(string folder)
     {
         var path = Path.Combine(folder, "weapons.json");
@@ -583,8 +587,8 @@ public class ApiTests
             Assert.That(weapons.GetArrayLength(), Is.EqualTo(1), "the sword's model is not in the data");
             Assert.That(weapons[0].GetProperty("name").GetString(), Is.EqualTo("VK78 Commando Rifle"));
             Assert.That(weapons[0].GetProperty("coreType").GetString(), Is.EqualTo("WeaponCommando"));
-            Assert.That(weapons[0].GetProperty("tags").EnumerateArray().Select(t => t.GetInt32()), Is.EqualTo(new[] { -40348340 }));
-            Assert.That(weapons[0].GetProperty("coatings").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "-2", "5", "9" }));
+            Assert.That(weapons[0].GetProperty("tags").EnumerateArray().Select(t => t.GetInt32()), Is.EqualTo(CommandoTags));
+            Assert.That(weapons[0].GetProperty("coatings").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(CommandoCoatings));
         }
     }
 
@@ -612,7 +616,7 @@ public class ApiTests
         using (Assert.EnterMultipleScope())
         {
             Assert.That(before.Weapons, Is.Empty);
-            Assert.That(after.Weapons.Select(w => w.Name), Is.EqualTo(new[] { "Energy Sword" }));
+            Assert.That(after.Weapons.Select(w => w.Name), Is.EqualTo(JustTheSword));
         }
     }
 

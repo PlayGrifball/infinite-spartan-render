@@ -1,5 +1,7 @@
 # The rigged GLB's pose clips and export. Takes Blender's modules as arguments so tests run without Blender.
 
+import json
+import re
 from pathlib import Path
 
 def find_stance(data, stance_id):
@@ -80,3 +82,71 @@ def add_visibility_clips(objects, shown, new_action):
             track.strips.new(name, 1, animation.action)
             animation.action = None
         obj.scale = scale
+
+
+def apply_materials(slots, data, mo, read_material, done, missing, problems):
+    # Ekur's material import of the selected objects, one material at a time: its own operator stops at the first missing JSON.
+    for slot in slots:
+        if slot.material and slot.material.node_tree:
+            _apply_material(slot, Path(data), mo, read_material, done, missing, problems)
+
+
+def _apply_material(slot, data, mo, read_material, done, missing, problems):
+    name = slot.name.split(".")[0]
+    if name in done or name in missing:
+        return
+    path = data / "materials" / f"{name}.json"
+    if not path.exists():
+        missing.add(name)
+        if re.fullmatch(r"-?\d+", name):
+            problems.append(f"material {name}: no JSON in the data folder")
+        return
+    mo.remove_nodes(slot.material.node_tree)
+    material = read_material(path)
+    done.add(name)
+    if material is None:
+        problems.append(f"material {name}: unreadable JSON")
+        return
+    try:
+        mo.run_material(material, slot.material.node_tree)
+    except Exception as e:
+        problems.append(f"material {name}: {e!r}"[:200])
+
+
+# A weapon model has a permutation per region for each build; the standard build is every region's "Default" permutation.
+DEFAULT_PERMUTATION = 1120495519
+
+
+def weapon_model(weapons_file, data, name):
+    entry = next((w for w in json.loads(Path(weapons_file).read_text()) if w["name"] == name), None)
+    model = Path(data) / "models" / f"{entry['model']}.ekur" if entry else None
+    return model if model and model.exists() else None
+
+
+def keep_default_build(meshes, permutation_of, remove, link):
+    chosen = [x for x in meshes if permutation_of(x) == DEFAULT_PERMUTATION] or list(meshes)
+    for x in meshes:
+        if x not in chosen:
+            remove(x)
+        elif not x.users_collection:
+            link(x)
+    return chosen
+
+
+def select_only(objects, chosen):
+    for x in objects:
+        x.select_set(False)
+    for x in chosen:
+        x.select_set(True)
+
+
+def hold(objects, armature, matrix, update):
+    # The model's origin is its grip: parent it to the grip bone where the pose puts it, so it follows whatever pose plays.
+    update()
+    location, rotation, _ = (armature.matrix_world @ armature.pose.bones[WEAPON_BONE].matrix).decompose()
+    hand = matrix.LocRotScale(location, rotation, (1, 1, 1))
+    for x in objects:
+        placed = hand @ x.matrix_world
+        x.parent, x.parent_type, x.parent_bone = armature, "BONE", WEAPON_BONE
+        update()
+        x.matrix_world = placed

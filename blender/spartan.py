@@ -258,58 +258,25 @@ problems = []
 
 
 def apply_materials():
-    # Ekur's material import of the selected objects, one material at a time: its own operator stops at the first missing JSON.
-    for slot in mo.get_materials():
-        if not slot.material or not slot.material.node_tree:
-            continue
-        n = slot.name.split(".")[0]
-        if n in done or n in missing:
-            continue
-        p = Path(f"{DATA}/materials/{n}.json")
-        if not p.exists():
-            missing.add(n)
-            if re.fullmatch(r"-?\d+", n):
-                problems.append(f"material {n}: no JSON in the data folder")
-            continue
-        mo.remove_nodes(slot.material.node_tree)
-        m = ju.read_json_file(p, jd.CommonMaterial)
-        done.add(n)
-        if m is None:
-            problems.append(f"material {n}: unreadable JSON")
-            continue
-        try:
-            mo.run_material(m, slot.material.node_tree)
-        except Exception as e:
-            problems.append(f"material {n}: {e!r}"[:200])
+    rig.apply_materials(mo.get_materials(), DATA, mo, lambda p: ju.read_json_file(p, jd.CommonMaterial), done, missing, problems)
 
 
 apply_materials()
 
-# A weapon model has a permutation per region for each build; the standard build is every region's "Default" permutation.
-DEFAULT_PERMUTATION = 1120495519
 weapon_objs = []
 if weapon:
-    entry = next((w for w in json.loads(WEAPONS.read_text()) if w["name"] == weapon), None)
-    model = Path(f"{DATA}/models/{entry['model']}.ekur") if entry else None
-    if model is None or not model.exists():
+    model = rig.weapon_model(WEAPONS, DATA, weapon)
+    if model is None:
         sys.exit(f"No model for weapon '{weapon}' in the data folder")
     importer = importlib.import_module(MOD + ".src.model.importer.model_importer").ModelImporter()
     meshes = [x for x in importer.start_import(str(model), bones=False) if x.type == "MESH"]
-    weapon_objs = [x for x in meshes if prop_id(x, "permutation_name") == DEFAULT_PERMUTATION] or meshes
-    for x in meshes:
-        if x not in weapon_objs:
-            bpy.data.objects.remove(x, do_unlink=True)
-        elif not x.users_collection:
-            sc.collection.objects.link(x)
-    for x in bpy.data.objects:
-        x.select_set(False)
-    for x in weapon_objs:
-        x.select_set(True)
+    weapon_objs = rig.keep_default_build(meshes, lambda x: prop_id(x, "permutation_name"), lambda x: bpy.data.objects.remove(x, do_unlink=True), sc.collection.objects.link)
+    rig.select_only(bpy.data.objects, weapon_objs)
     mp.use_default_coating = not weapon_coating
     mp.coating_id = weapon_coating
     mp.override_visor = False
     apply_materials()
-    print("WEAPON", weapon, entry["model"], len(weapon_objs), "meshes", flush=True)
+    print("WEAPON", weapon, model.name, len(weapon_objs), "meshes", flush=True)
 print("MATS", len(done), "missing", sorted(missing))
 phase("materials")
 if problems:
@@ -341,16 +308,7 @@ else:
     load_clip(stance_path, "stance")
 sc.frame_set(1)
 if weapon_objs:
-    # The model's origin is its grip: hold it on the right hand's grip bone, so it follows whatever pose plays.
-    grip = armature.pose.bones[rig.WEAPON_BONE]
-    bpy.context.view_layer.update()
-    location, rotation, _ = (armature.matrix_world @ grip.matrix).decompose()
-    hand = mathutils.Matrix.LocRotScale(location, rotation, mathutils.Vector((1, 1, 1)))
-    for x in weapon_objs:
-        placed = hand @ x.matrix_world
-        x.parent, x.parent_type, x.parent_bone = armature, "BONE", rig.WEAPON_BONE
-        bpy.context.view_layer.update()
-        x.matrix_world = placed
+    rig.hold(weapon_objs, armature, mathutils.Matrix, bpy.context.view_layer.update)
     if output == "glb":
         rig.add_visibility_clips(weapon_objs, {"neutral": False, "stance": True}, bpy.data.actions.new)
     keep += weapon_objs

@@ -150,3 +150,107 @@ def test_a_weapon_is_scaled_to_nothing_in_the_clips_it_is_hidden_in_and_keeps_it
 
 def test_a_weapon_is_held_on_the_right_hand_grip():
     assert rig.WEAPON_BONE == "b_r_grip"
+
+
+class FakeMaterials:
+    def __init__(self, fail=()):
+        self.removed, self.ran, self.fail = [], [], fail
+
+    def remove_nodes(self, tree):
+        self.removed.append(tree)
+
+    def run_material(self, material, tree):
+        if material in self.fail:
+            raise ValueError("bad")
+        self.ran.append((material, tree))
+
+
+def slot(name, tree="tree"):
+    return SimpleNamespace(name=name, material=SimpleNamespace(node_tree=tree) if tree else None)
+
+
+def test_materials_are_applied_once_each_and_every_problem_is_named(tmp_path):
+    (tmp_path / "materials").mkdir()
+    for name in ("11", "12", "13"):
+        (tmp_path / "materials" / f"{name}.json").write_text("{}")
+    mo = FakeMaterials(fail=("m13",))
+    done, missing, problems = set(), set(), []
+    reads = {"11": "m11", "12": None, "13": "m13"}
+
+    rig.apply_materials(
+        [slot("11"), slot("11.001"), slot("12"), slot("13"), slot("99"), slot("Material"), slot("14", tree=None)],
+        tmp_path, mo, lambda p: reads[p.stem], done, missing, problems)
+
+    assert mo.ran == [("m11", "tree")]
+    assert done == {"11", "12", "13"}
+    assert missing == {"99", "Material"}
+    assert problems == ["material 12: unreadable JSON", "material 13: ValueError('bad')", "material 99: no JSON in the data folder"]
+
+
+def test_a_weapon_is_found_by_name_only_when_its_model_is_in_the_data(tmp_path):
+    weapons = tmp_path / "weapons.json"
+    weapons.write_text('[{"name": "VK78 Commando Rifle", "model": "commando"}, {"name": "Energy Sword", "model": "energy_sword"}]')
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "commando.ekur").write_bytes(b"x")
+
+    assert rig.weapon_model(weapons, tmp_path, "VK78 Commando Rifle") == tmp_path / "models" / "commando.ekur"
+    assert rig.weapon_model(weapons, tmp_path, "Energy Sword") is None
+    assert rig.weapon_model(weapons, tmp_path, "Nope") is None
+
+
+def mesh(name, permutation, linked=True):
+    return SimpleNamespace(name=name, permutation=permutation, users_collection=["c"] if linked else [])
+
+
+def test_the_default_build_is_kept_and_linked_and_the_other_builds_removed():
+    default, other, loose = mesh("a", rig.DEFAULT_PERMUTATION), mesh("b", 5), mesh("c", rig.DEFAULT_PERMUTATION, linked=False)
+    removed, linked = [], []
+
+    kept = rig.keep_default_build([default, other, loose], lambda x: x.permutation, removed.append, linked.append)
+
+    assert kept == [default, loose]
+    assert removed == [other]
+    assert linked == [loose]
+
+
+def test_a_model_without_a_default_build_keeps_every_mesh():
+    meshes = [mesh("a", 5), mesh("b", 6)]
+
+    assert rig.keep_default_build(meshes, lambda x: x.permutation, lambda x: None, lambda x: None) == meshes
+
+
+def test_select_only_selects_just_the_chosen():
+    seen = {}
+    objects = [SimpleNamespace(name=n, select_set=lambda v, n=n: seen.__setitem__(n, v)) for n in "abc"]
+
+    rig.select_only(objects, objects[1:2])
+
+    assert seen == {"a": False, "b": True, "c": False}
+
+
+class M:
+    # A stand-in for mathutils.Matrix: composes names, so the test reads the order of the products.
+    def __init__(self, name):
+        self.name = name
+
+    def __matmul__(self, other):
+        return M(f"{self.name}*{other.name}")
+
+    def decompose(self):
+        return (f"loc({self.name})", f"rot({self.name})", "scale")
+
+    @staticmethod
+    def LocRotScale(location, rotation, scale):
+        return M(f"[{location},{rotation},{scale}]")
+
+
+def test_a_weapon_is_parented_to_the_grip_bone_where_the_pose_puts_the_hand():
+    updates = []
+    armature = SimpleNamespace(matrix_world=M("arm"), pose=SimpleNamespace(bones={rig.WEAPON_BONE: SimpleNamespace(matrix=M("grip"))}))
+    gun = SimpleNamespace(matrix_world=M("gun"), parent=None, parent_type=None, parent_bone=None)
+
+    rig.hold([gun], armature, M, lambda: updates.append(1))
+
+    assert (gun.parent, gun.parent_type, gun.parent_bone) == (armature, "BONE", "b_r_grip")
+    assert gun.matrix_world.name == "[loc(arm*grip),rot(arm*grip),(1, 1, 1)]*gun"
+    assert len(updates) == 2
