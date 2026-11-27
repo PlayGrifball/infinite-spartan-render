@@ -25,6 +25,8 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
     private readonly object _lock = new();
     private string? _signature;
     private Catalog? _built;
+    private string? _weaponsSignature;
+    private List<WeaponEntry> _weaponEntries = [];
 
     // A core's catalog is written next to the cache by the warm-up, and replaced with each Blender script.
     public string PathFor(string core, string renderer)
@@ -51,8 +53,8 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
         if (Directory.Exists(folder)) files.AddRange(Directory.EnumerateFiles(folder, "*.json").Order(StringComparer.Ordinal));
         files.Add(Path.Combine(o.EkurAssets, "all_visors.json"));
         files.Add(o.WeaponsPath);
-        files.AddRange(ReadWeapons(o.WeaponsPath).Select(w => ModelPath(o.DataDirectory, w.Model)));
-        return string.Join('\n', files.Select(f => new FileInfo(f) is { Exists: true } i ? $"{f}|{i.Length}|{i.LastWriteTimeUtc.Ticks}" : f + "|missing"));
+        files.AddRange(WeaponEntries().Select(w => ModelPath(o.DataDirectory, w.Model)));
+        return string.Join('\n', files.Select(FileSignature));
     }
 
     private Catalog Build(RenderOptions o, string renderer)
@@ -67,6 +69,28 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
         return new Catalog(cores, Coatings(o.DataDirectory), Visors(o.EkurAssets), pending, Weapons(o));
     }
 
+    private static string FileSignature(string f) => new FileInfo(f) is { Exists: true } i ? $"{f}|{i.Length}|{i.LastWriteTimeUtc.Ticks}" : f + "|missing";
+
+    // The weapon list, read again only when its file changes
+    private List<WeaponEntry> WeaponEntries()
+    {
+        var path = options.Value.WeaponsPath;
+        var signature = FileSignature(path);
+        lock (_lock)
+        {
+            if (signature != _weaponsSignature)
+            {
+                _weaponEntries = ReadWeapons(path);
+                _weaponsSignature = signature;
+            }
+            return _weaponEntries;
+        }
+    }
+
+    // The entry a weapon is rendered from, as text: part of the id of a loadout holding it, so a changed entry renders it again.
+    public string WeaponIdentity(string name)
+        => WeaponEntries().FirstOrDefault(w => w.Name == name) is { } entry ? JsonSerializer.Serialize(entry, Web) : "";
+
     private static CatalogCore? ReadCore(string file, string name)
     {
         try { return File.Exists(file) && JsonSerializer.Deserialize<CatalogCore>(File.ReadAllText(file), Web) is { } c ? c with { Name = name } : null; }
@@ -75,15 +99,15 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
 
     private static string ModelPath(string dataDirectory, string model) => Path.Combine(dataDirectory, "models", model + ".ekur");
 
-    internal static List<WeaponEntry> ReadWeapons(string file)
+    private static List<WeaponEntry> ReadWeapons(string file)
     {
         try { return File.Exists(file) ? JsonSerializer.Deserialize<List<WeaponEntry>>(File.ReadAllText(file), Web) ?? [] : []; }
         catch (Exception e) when (e is JsonException or IOException) { return []; }
     }
 
     // The weapons whose model is in the data folder, each with the coatings of its own stylelists.
-    private static List<CatalogWeapon> Weapons(RenderOptions o)
-        => ReadWeapons(o.WeaponsPath)
+    private List<CatalogWeapon> Weapons(RenderOptions o)
+        => WeaponEntries()
             .Where(w => File.Exists(ModelPath(o.DataDirectory, w.Model)))
             .Select(w => new CatalogWeapon(w.Name, w.CoreType, w.Tags ?? [], StyleIds((w.Stylelists ?? []).Select(id => Path.Combine(o.DataDirectory, "stylelists", $"{id}.json")))))
             .ToList();

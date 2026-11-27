@@ -1,5 +1,6 @@
 # The rigged GLB's pose clips and export. Takes Blender's modules as arguments so tests run without Blender.
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -117,8 +118,12 @@ def _apply_material(slot, data, mo, read_material, done, missing, problems):
 DEFAULT_PERMUTATION = 1120495519
 
 
+def weapon_entry(weapons_file, name):
+    return next((w for w in json.loads(Path(weapons_file).read_text()) if w["name"] == name), None)
+
+
 def weapon_model(weapons_file, data, name):
-    entry = next((w for w in json.loads(Path(weapons_file).read_text()) if w["name"] == name), None)
+    entry = weapon_entry(weapons_file, name)
     model = Path(data) / "models" / f"{entry['model']}.ekur" if entry else None
     return model if model and model.exists() else None
 
@@ -145,8 +150,27 @@ def hold(objects, armature, matrix, update):
     update()
     location, rotation, _ = (armature.matrix_world @ armature.pose.bones[WEAPON_BONE].matrix).decompose()
     hand = matrix.LocRotScale(location, rotation, (1, 1, 1))
+    placed = [hand @ x.matrix_world for x in objects]
     for x in objects:
-        placed = hand @ x.matrix_world
         x.parent, x.parent_type, x.parent_bone = armature, "BONE", WEAPON_BONE
-        update()
-        x.matrix_world = placed
+    update()
+    for x, world in zip(objects, placed):
+        x.matrix_world = world
+
+
+def own_materials(objects, others):
+    # Ekur reuses a material by name, so a weapon can share one with the armor: give the weapon its own copy to coat.
+    theirs = {id(s.material) for o in others for s in o.material_slots if s.material}
+    for obj in objects:
+        for slot in obj.material_slots:
+            if slot.material and id(slot.material) in theirs:
+                slot.material = slot.material.copy()
+
+
+def bake_key(cache, scripts, kind, parts):
+    # Baked textures depend on what is baked and on the scripts that built its materials, not on the stance.
+    digest = hashlib.sha256()
+    for script in scripts:
+        digest.update(Path(script).read_bytes())
+    digest.update(json.dumps([kind, parts], sort_keys=True).encode())
+    return Path(cache) / digest.hexdigest()[:32]

@@ -35,7 +35,7 @@ public sealed record Loadout
 
     private static readonly Regex CoatingId = new(@"^-?\d{1,12}$", RegexOptions.Compiled);
 
-    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null, IReadOnlyCollection<string>? weapons = null)
+    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null, IReadOnlyCollection<CatalogWeapon>? weapons = null)
     {
         if (string.IsNullOrWhiteSpace(Core) || Core.Length > 64) return "core is required (at most 64 characters)";
         if (!cores.Contains(Core)) return $"core must be one of: {string.Join(", ", cores)}";
@@ -49,12 +49,15 @@ public sealed record Loadout
         return null;
     }
 
-    private string? WeaponProblem(IReadOnlyCollection<string>? weapons)
+    private string? WeaponProblem(IReadOnlyCollection<CatalogWeapon>? weapons)
     {
-        if (!string.IsNullOrEmpty(Weapon) && (Weapon.Length > 64 || (weapons is not null && !weapons.Contains(Weapon)))) return "weapon must be a name from the catalog";
+        var weapon = weapons?.FirstOrDefault(w => w.Name == Weapon);
+        if (!string.IsNullOrEmpty(Weapon) && (Weapon.Length > 64 || (weapons is not null && weapon is null))) return "weapon must be a name from the catalog";
         if (string.IsNullOrEmpty(WeaponCoating)) return null;
         if (!CoatingId.IsMatch(WeaponCoating)) return "weapon coating must be a numeric coating id";
-        return string.IsNullOrEmpty(Weapon) ? "weapon coating needs a weapon" : null;
+        if (string.IsNullOrEmpty(Weapon)) return "weapon coating needs a weapon";
+        // Ekur silently renders the default for a coating the weapon's stylelists lack, which would cache a wrong render under this id
+        return weapon is not null && !weapon.Coatings.Contains(WeaponCoating) ? "weapon coating must be one of that weapon's coatings" : null;
     }
 
     private string? PiecesProblem()

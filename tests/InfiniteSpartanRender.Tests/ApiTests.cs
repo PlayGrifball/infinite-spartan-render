@@ -300,23 +300,42 @@ public class ApiTests
     }
 
     [Test]
-    public async Task AChangedWeaponsFile_ChangesTheId_SoAWeaponIsNotServedFromItsOldModel()
+    public async Task AChangedWeaponEntry_ChangesTheIdOfTheLoadoutsHoldingIt_AndNoOther()
     {
         var folder = Scratch();
+        var data = Scratch();
+        Directory.CreateDirectory(Path.Combine(data, "models"));
+        await File.WriteAllTextAsync(Path.Combine(data, "models", "a.ekur"), "x");
+        await File.WriteAllTextAsync(Path.Combine(data, "models", "b.ekur"), "x");
         var weapons = Path.Combine(folder, "weapons.json");
         await File.WriteAllTextAsync(Path.Combine(folder, "spartan.py"), "print(1)");
-        await File.WriteAllTextAsync(weapons, "[]");
+        await File.WriteAllTextAsync(weapons, """[{"name":"A","model":"a","coreType":null,"tags":[],"stylelists":[]},{"name":"B","model":"b","coreType":null,"tags":[],"stylelists":[]}]""");
         _settings["Render:ScriptPath"] = Path.Combine(folder, "spartan.py");
         _settings["Render:WeaponsPath"] = weapons;
+        _settings["Render:DataDirectory"] = data;
         Start();
-        var before = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+        var before = await IdsAsync();
 
-        await File.WriteAllTextAsync(weapons, """[{"name":"A","model":"a","coreType":null,"tags":[],"stylelists":[]}]""");
+        await File.WriteAllTextAsync(weapons, """[{"name":"A","model":"b","coreType":null,"tags":[],"stylelists":[]},{"name":"B","model":"b","coreType":null,"tags":[],"stylelists":[]}]""");
         Start();
-        var after = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+        var after = await IdsAsync();
 
-        Assert.That(after, Is.Not.EqualTo(before));
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(after.Empty, Is.EqualTo(before.Empty), "an empty-handed loadout keeps its files");
+            Assert.That(after.B, Is.EqualTo(before.B), "a weapon whose entry did not change keeps its files");
+            Assert.That(after.A, Is.Not.EqualTo(before.A), "the changed weapon is rendered again");
+        }
+
+        async Task<(string? Empty, string? A, string? B)> IdsAsync()
+        {
+            async Task<string?> IdOf(object body) => (await (await _client.PostAsJsonAsync("/spartans", body)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+            return (await IdOf(Body()), await IdOf(WithWeapon("A")), await IdOf(WithWeapon("B")));
+        }
     }
+
+    private static object WithWeapon(string weapon) =>
+        new { core = "Mark VII", armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating = "1120495519", output = "png", size = "small", weapon };
 
     [Test]
     public async Task AnUnknownSet_Is404()
@@ -801,7 +820,7 @@ public class LoadoutTests
         }
     }
 
-    private static readonly string[] JustCommando = { "VK78 Commando Rifle" };
+    private static readonly CatalogWeapon[] JustCommando = [new("VK78 Commando Rifle", "WeaponCommando", [-40348340], ["-976095822", "5", "6"])];
 
     [Test]
     public void AWeapon_MustBeInTheCatalog_AndItsCoatingIsANumericIdThatNeedsAWeapon()
@@ -813,6 +832,7 @@ public class LoadoutTests
             Assert.That(loadout.Validate(OnlyX, null, JustCommando), Is.Null);
             Assert.That((loadout with { Weapon = "Nope" }).Validate(OnlyX, null, JustCommando), Does.Contain("weapon must be a name from the catalog"));
             Assert.That((loadout with { WeaponCoating = "red" }).Validate(OnlyX, null, JustCommando), Does.Contain("weapon coating must be a numeric coating id"));
+            Assert.That((loadout with { WeaponCoating = "1120495519" }).Validate(OnlyX, null, JustCommando), Does.Contain("weapon coating must be one of that weapon's coatings"));
             Assert.That((loadout with { Weapon = null }).Validate(OnlyX, null, JustCommando), Does.Contain("weapon coating needs a weapon"));
             Assert.That(new Loadout { Core = "x" }.Validate(OnlyX, null, JustCommando), Is.Null, "no weapon is empty hands");
         }

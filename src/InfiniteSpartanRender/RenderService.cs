@@ -28,18 +28,20 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
 
     public string CachedPath(string id, string output) => PathFor(id, output);
 
-    // The Blender scripts and the weapon list are the renderer: any change to them changes every id, so old files are never served.
+    // The Blender scripts are the renderer: any change to them changes every id, so old files are never served.
     private readonly Lazy<string> _renderer = new(() =>
     {
         var script = options.Value.ScriptPath;
         if (!File.Exists(script)) return "";
-        var files = new[] { script, Path.Combine(Path.GetDirectoryName(script) ?? "", "rig.py"), options.Value.WeaponsPath }.Where(File.Exists);
+        var files = new[] { script, Path.Combine(Path.GetDirectoryName(script) ?? "", "rig.py") }.Where(File.Exists);
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(files.SelectMany(File.ReadAllBytes).ToArray()))[..12];
     });
 
     public Catalog Catalog() => catalog.Get(_renderer.Value);
 
-    private string IdOf(Loadout loadout) => loadout.Id(_renderer.Value);
+    // A held weapon's own entry joins the renderer, so a changed entry renders the loadouts holding it again, and no other
+    private string IdOf(Loadout loadout)
+        => loadout.Id(string.IsNullOrEmpty(loadout.Weapon) ? _renderer.Value : $"{_renderer.Value}|{catalog.WeaponIdentity(loadout.Weapon)}");
 
     // Done when the file is in the cache (survives restarts); otherwise whatever this process knows about the job.
     // A job lost to a restart is unknown here: the client posts the loadout again.

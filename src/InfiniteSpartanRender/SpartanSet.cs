@@ -26,18 +26,18 @@ public sealed record SpartanSetRequest
     {
         int? chosen = Stance == NeutralStance ? null : Stance;
         var shared = new Loadout { Core = Core, Armor = Armor, Parts = Parts, Coating = Coating, Visor = Visor, DisableDamage = DisableDamage, Size = Size };
+        var armed = shared with { Stance = chosen, Weapon = Weapon, WeaponCoating = WeaponCoating };
         var items = new List<(string, Loadout)>();
-        foreach (var (pose, stance) in new[] { ("stance", chosen), ("neutral", (int?)null) })
+        foreach (var (pose, basis) in new[] { ("stance", armed), ("neutral", shared) })
         {
-            var basis = pose == "stance" ? shared with { Stance = stance, Weapon = Weapon, WeaponCoating = WeaponCoating } : shared with { Stance = stance };
             items.Add(($"{pose}-body", basis with { Output = "png", Framing = "body" }));
             items.Add(($"{pose}-head", basis with { Output = "png", Framing = "head" }));
         }
-        items.Add(("glb", shared with { Stance = chosen, Weapon = Weapon, WeaponCoating = WeaponCoating, Output = "glb" }));
+        items.Add(("glb", armed with { Output = "glb" }));
         return items;
     }
 
-    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null, IReadOnlyCollection<string>? weapons = null)
+    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null, IReadOnlyCollection<CatalogWeapon>? weapons = null)
     {
         if (Stance is null) return "stance is required";
         return Items()[0].Loadout.Validate(cores, visors, weapons);

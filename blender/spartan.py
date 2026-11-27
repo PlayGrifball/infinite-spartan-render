@@ -225,10 +225,7 @@ keep = list(dict.fromkeys(keep))
 for x in list(bpy.data.objects):
     if x.type == "MESH" and x not in keep:
         bpy.data.objects.remove(x, do_unlink=True)
-for x in bpy.data.objects:
-    x.select_set(False)
-for x in keep:
-    x.select_set(True)
+rig.select_only(bpy.data.objects, keep)
 
 mp = sc.material_properties
 mp.selected_only = True
@@ -257,11 +254,11 @@ missing = set()
 problems = []
 
 
-def apply_materials():
-    rig.apply_materials(mo.get_materials(), DATA, mo, lambda p: ju.read_json_file(p, jd.CommonMaterial), done, missing, problems)
+def apply_materials(applied):
+    rig.apply_materials(mo.get_materials(), DATA, mo, lambda p: ju.read_json_file(p, jd.CommonMaterial), applied, missing, problems)
 
 
-apply_materials()
+apply_materials(done)
 
 weapon_objs = []
 if weapon:
@@ -271,11 +268,14 @@ if weapon:
     importer = importlib.import_module(MOD + ".src.model.importer.model_importer").ModelImporter()
     meshes = [x for x in importer.start_import(str(model), bones=False) if x.type == "MESH"]
     weapon_objs = rig.keep_default_build(meshes, lambda x: prop_id(x, "permutation_name"), lambda x: bpy.data.objects.remove(x, do_unlink=True), sc.collection.objects.link)
+    rig.own_materials(weapon_objs, keep)
     rig.select_only(bpy.data.objects, weapon_objs)
     mp.use_default_coating = not weapon_coating
     mp.coating_id = weapon_coating
     mp.override_visor = False
-    apply_materials()
+    weapon_done = set()
+    apply_materials(weapon_done)
+    done |= weapon_done
     print("WEAPON", weapon, model.name, len(weapon_objs), "meshes", flush=True)
 print("MATS", len(done), "missing", sorted(missing))
 phase("materials")
@@ -315,14 +315,17 @@ if weapon_objs:
 phase("pose")
 
 
-def bake_folder(size):
-    # The baked textures depend on the loadout, not the stance (a pose moves vertices, not UVs): keep them per loadout.
+SCRIPTS = [Path(sys.argv[sys.argv.index("--python") + 1]).resolve(), Path(sys.argv[sys.argv.index("--python") + 1]).resolve().parent / "rig.py"]
+
+
+def bake_folder(size, held):
+    # The baked textures depend on the loadout, not the stance (a pose moves vertices, not UVs): the armor's per armor, a held weapon's per weapon.
     cache = os.environ.get("ISR_BAKE_CACHE")
     if not cache:
         return None
-    renderer = hashlib.sha256(Path(sys.argv[sys.argv.index("--python") + 1]).read_bytes()).hexdigest()
-    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, visor, disable_damage, weapon, weapon_coating, size], sort_keys=True)
-    return Path(cache) / hashlib.sha256(ident.encode()).hexdigest()[:32]
+    if held:
+        return rig.bake_key(cache, SCRIPTS, "weapon", [tool_version(), rig.weapon_entry(WEAPONS, weapon), weapon_coating, disable_damage, size])
+    return rig.bake_key(cache, SCRIPTS, "armor", [tool_version(), core, sorted(armor.items()), sorted(parts.items()), coating, visor, disable_damage, size])
 
 
 def bake_object(obj, passes, size, images):
@@ -356,8 +359,8 @@ def bake_to_plain_materials(size):
     sc.cycles.samples = 1
     sc.cycles.use_denoising = False
     passes = (("color", "DIFFUSE", "sRGB"), ("rough", "ROUGHNESS", "Non-Color"), ("normal", "NORMAL", "Non-Color"), ("emit", "EMIT", "sRGB"))
-    folder = bake_folder(size)
     for obj in keep:
+        folder = bake_folder(size, obj in weapon_objs)
         files = {key: folder / f"{re.sub(r'[^A-Za-z0-9._-]+', '-', obj.name)}_{key}.png" for key, _, _ in passes} if folder else {}
         images = {}
         if files and all(f.exists() for f in files.values()):

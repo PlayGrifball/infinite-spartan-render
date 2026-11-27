@@ -248,9 +248,53 @@ def test_a_weapon_is_parented_to_the_grip_bone_where_the_pose_puts_the_hand():
     updates = []
     armature = SimpleNamespace(matrix_world=M("arm"), pose=SimpleNamespace(bones={rig.WEAPON_BONE: SimpleNamespace(matrix=M("grip"))}))
     gun = SimpleNamespace(matrix_world=M("gun"), parent=None, parent_type=None, parent_bone=None)
+    scope = SimpleNamespace(matrix_world=M("scope"), parent=None, parent_type=None, parent_bone=None)
 
-    rig.hold([gun], armature, M, lambda: updates.append(1))
+    rig.hold([gun, scope], armature, M, lambda: updates.append(1))
 
     assert (gun.parent, gun.parent_type, gun.parent_bone) == (armature, "BONE", "b_r_grip")
     assert gun.matrix_world.name == "[loc(arm*grip),rot(arm*grip),(1, 1, 1)]*gun"
-    assert len(updates) == 2
+    assert scope.matrix_world.name == "[loc(arm*grip),rot(arm*grip),(1, 1, 1)]*scope"
+    assert len(updates) == 2, "once to read the hand, once after parenting every mesh"
+
+
+class Material:
+    def __init__(self, name):
+        self.name = name
+
+    def copy(self):
+        return Material(self.name + ".001")
+
+
+def test_a_weapon_gets_its_own_copy_of_a_material_the_armor_also_uses():
+    shared, own = Material("7"), Material("8")
+    armor = SimpleNamespace(material_slots=[SimpleNamespace(material=shared)])
+    gun = SimpleNamespace(material_slots=[SimpleNamespace(material=shared), SimpleNamespace(material=own), SimpleNamespace(material=None)])
+
+    rig.own_materials([gun], [armor])
+
+    assert [s.material.name if s.material else None for s in gun.material_slots] == ["7.001", "8", None]
+    assert armor.material_slots[0].material is shared
+
+
+def test_a_bake_key_changes_with_the_script_files_and_with_what_is_baked(tmp_path):
+    script, helpers = tmp_path / "spartan.py", tmp_path / "rig.py"
+    script.write_text("a")
+    helpers.write_text("b")
+    key = rig.bake_key(tmp_path / "bakes", [script, helpers], "armor", ["Mark VII"])
+
+    helpers.write_text("c")
+    changed_helpers = rig.bake_key(tmp_path / "bakes", [script, helpers], "armor", ["Mark VII"])
+    other_parts = rig.bake_key(tmp_path / "bakes", [script, helpers], "armor", ["Yoroi"])
+    weapon = rig.bake_key(tmp_path / "bakes", [script, helpers], "weapon", ["Mark VII"])
+
+    assert key.parent == tmp_path / "bakes"
+    assert len({key, changed_helpers, other_parts, weapon}) == 4
+
+
+def test_a_weapons_entry_is_found_by_name(tmp_path):
+    weapons = tmp_path / "weapons.json"
+    weapons.write_text('[{"name": "A", "model": "a"}]')
+
+    assert rig.weapon_entry(weapons, "A") == {"name": "A", "model": "a"}
+    assert rig.weapon_entry(weapons, "B") is None
