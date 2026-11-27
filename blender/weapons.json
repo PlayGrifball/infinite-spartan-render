@@ -35,10 +35,10 @@
   {"name": "Sandwich", "model": "sandwich", "coreType": null, "tags": [], "stylelists": []},
   {"name": "Halo 5 Magnum", "model": "h5_magnum", "coreType": null, "tags": [], "stylelists": []},
   {"name": "Halo 5 DMR", "model": "h5_dmr", "coreType": null, "tags": [], "stylelists": []},
-  {"name": "Fusion Coil", "model": "fusion_coil", "coreType": null, "tags": [493070541], "stylelists": []},
+  {"name": "Fusion Coil", "model": "fusion_coil", "coreType": null, "tags": [], "stylelists": []},
   {"name": "Frag Grenade", "model": "frag_grenade", "coreType": null, "tags": [], "stylelists": [532220732]},
   {"name": "Plasma Grenade", "model": "plasma_grenade", "coreType": null, "tags": [], "stylelists": [911002746]},
   {"name": "Spike Grenade", "model": "spike_grenade", "coreType": null, "tags": [], "stylelists": [808639235]},
   {"name": "Dynamo Grenade", "model": "dynamo_grenade", "coreType": null, "tags": [], "stylelists": [-1203168501]},
-  {"name": "Team Banner", "model": "team_banner", "coreType": null, "tags": [708387624], "stylelists": []}
+  {"name": "Team Banner", "model": "team_banner", "coreType": null, "tags": [], "stylelists": []}
 ]
