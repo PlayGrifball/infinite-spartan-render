@@ -148,12 +148,14 @@ def select_only(objects, chosen):
         x.select_set(True)
 
 
-def hold(objects, armature, matrix, update, offset):
+def hold(objects, armature, matrix, update, offset, adjust=None):
     # The model's origin is its grip: parent it to the grip bone where the pose puts it, turned by the hand's weapon marker,
     # so it follows whatever pose plays.
     update()
     location, rotation, _ = (armature.matrix_world @ armature.pose.bones[WEAPON_BONE].matrix).decompose()
     hand = matrix.LocRotScale(location, rotation, (1, 1, 1)) @ offset
+    if adjust:
+        hand = adjust(hand)
     placed = [hand @ x.matrix_world for x in objects]
     for x in objects:
         x.parent, x.parent_type, x.parent_bone = armature, "BONE", WEAPON_BONE
@@ -178,3 +180,57 @@ def bake_key(cache, scripts, kind, parts):
         digest.update(Path(script).read_bytes())
     digest.update(json.dumps([kind, parts], sort_keys=True).encode())
     return Path(cache) / digest.hexdigest()[:32]
+
+
+# The off hand's grip bone, which a two-handed pose puts where the gun's foregrip belongs.
+OFF_HAND_BONE = "b_l_grip"
+# The weapon marker a Spartan's off hand holds.
+FOREGRIP_MARKER = "left_hand_spartan"
+
+
+def marker_position(markers, name):
+    # Where a weapon's marker sits in the weapon's own space (its markers imported with the rig at rest), or None.
+    found = next((m for m in markers if m.name.split(".")[0] == name), None)
+    return tuple(found.matrix_world.translation) if found else None
+
+
+# How far the pose's off-hand grip may be from a gun's foregrip and still be holding it; further, the hold is one-handed.
+TWO_HAND_REACH = 0.35
+
+
+def _sub(a, b):
+    return tuple(x - y for x, y in zip(a, b))
+
+
+def _unit(v):
+    n = sum(x * x for x in v) ** 0.5
+    return tuple(x / n for x in v)
+
+
+def aim_rotation(source, target):
+    # The rotation (rows of a 3x3) turning the direction of source onto that of target, about their common perpendicular.
+    a, b = _unit(source), _unit(target)
+    c = sum(x * y for x, y in zip(a, b))
+    axis = (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
+    s = sum(x * x for x in axis) ** 0.5
+    if s < 1e-9:
+        if c > 0:
+            return ((1, 0, 0), (0, 1, 0), (0, 0, 1))
+        # Opposite: half a turn about any axis perpendicular to them
+        other = (0, 1, 0) if abs(a[0]) > 0.9 else (1, 0, 0)
+        axis = _unit((a[1] * other[2] - a[2] * other[1], a[2] * other[0] - a[0] * other[2], a[0] * other[1] - a[1] * other[0]))
+        s, c = 0.0, -1.0
+    else:
+        axis = tuple(x / s for x in axis)
+    x, y, z = axis
+    t = 1 - c
+    return ((t * x * x + c, t * x * y - s * z, t * x * z + s * y),
+            (t * x * y + s * z, t * y * y + c, t * y * z - s * x),
+            (t * x * z - s * y, t * y * z + s * x, t * z * z + c))
+
+
+def off_hand_turn(grip, foregrip, off_grip, reach=TWO_HAND_REACH):
+    # A two-handed hold: the turn about the grip that points the gun's foregrip at the pose's off-hand grip. None when one-handed.
+    if sum(d * d for d in _sub(foregrip, off_grip)) ** 0.5 > reach:
+        return None
+    return aim_rotation(_sub(foregrip, grip), _sub(off_grip, grip))

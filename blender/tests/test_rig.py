@@ -304,3 +304,48 @@ def test_a_weapons_entry_is_found_by_name(tmp_path):
 
     assert rig.weapon_entry(weapons, "A") == {"name": "A", "model": "a"}
     assert rig.weapon_entry(weapons, "B") is None
+
+
+def apply(rows, v):
+    return tuple(sum(r * x for r, x in zip(row, v)) for row in rows)
+
+
+def close(a, b):
+    return all(abs(x - y) < 1e-6 for x, y in zip(a, b))
+
+
+def test_aim_rotation_turns_one_direction_onto_another():
+    quarter = rig.aim_rotation((1, 0, 0), (0, 2, 0))
+    assert close(apply(quarter, (1, 0, 0)), (0, 1, 0))
+    assert close(apply(quarter, (0, 0, 1)), (0, 0, 1)), "about their common perpendicular, so nothing else turns"
+    assert close(apply(rig.aim_rotation((0, 0, 3), (0, 0, 1)), (5, 6, 7)), (5, 6, 7))
+    assert close(apply(rig.aim_rotation((1, 0, 0), (-1, 0, 0)), (1, 0, 0)), (-1, 0, 0))
+
+
+def test_a_two_handed_hold_turns_the_gun_so_its_foregrip_points_at_the_off_hand():
+    turn = rig.off_hand_turn(grip=(0, 0, 0), foregrip=(0.3, 0, 0), off_grip=(0, 0.3, 0.05), reach=0.5)
+
+    aimed = apply(turn, (0.3, 0, 0))
+    length = (0.3 ** 2 + 0.05 ** 2) ** 0.5
+    assert close(aimed, (0, 0.3 * 0.3 / length, 0.3 * 0.05 / length))
+
+
+def test_a_one_handed_hold_leaves_the_gun_alone():
+    assert rig.off_hand_turn(grip=(0, 0, 0), foregrip=(0.3, 0, 0), off_grip=(-0.5, 0.4, -0.6)) is None
+
+
+def test_hold_lets_the_caller_adjust_the_hand_before_parenting():
+    armature = SimpleNamespace(matrix_world=M("arm"), pose=SimpleNamespace(bones={rig.WEAPON_BONE: SimpleNamespace(matrix=M("grip"))}))
+    gun = SimpleNamespace(matrix_world=M("gun"), parent=None, parent_type=None, parent_bone=None)
+
+    rig.hold([gun], armature, M, lambda: None, M("marker"), adjust=lambda hand: M(f"turned({hand.name})"))
+
+    assert gun.matrix_world.name == "turned([loc(arm*grip),rot(arm*grip),(1, 1, 1)]*marker)*gun"
+
+
+def test_a_markers_position_is_found_by_name_ignoring_blenders_suffix():
+    marker = SimpleNamespace(name="left_hand_spartan.001", matrix_world=SimpleNamespace(translation=(0.31, 0.03, 0.05)))
+    other = SimpleNamespace(name="right_hand", matrix_world=SimpleNamespace(translation=(0, 0, 0)))
+
+    assert rig.marker_position([other, marker], rig.FOREGRIP_MARKER) == (0.31, 0.03, 0.05)
+    assert rig.marker_position([other], rig.FOREGRIP_MARKER) is None
