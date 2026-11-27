@@ -152,6 +152,12 @@ def test_a_weapon_is_held_on_the_right_hand_grip():
     assert rig.WEAPON_BONE == "b_r_grip"
 
 
+def test_the_weapon_marker_is_a_unit_quaternion_in_blender_order():
+    w, x, y, z = rig.PRIMARY_WEAPON_ROTATION
+    assert abs(w * w + x * x + y * y + z * z - 1) < 0.01
+    assert (w, z) == (0.638, 0.769), "Halo stores x, y, z, w; Blender takes w first"
+
+
 class FakeMaterials:
     def __init__(self, fail=()):
         self.removed, self.ran, self.fail = [], [], fail
@@ -250,11 +256,11 @@ def test_a_weapon_is_parented_to_the_grip_bone_where_the_pose_puts_the_hand():
     gun = SimpleNamespace(matrix_world=M("gun"), parent=None, parent_type=None, parent_bone=None)
     scope = SimpleNamespace(matrix_world=M("scope"), parent=None, parent_type=None, parent_bone=None)
 
-    rig.hold([gun, scope], armature, M, lambda: updates.append(1))
+    rig.hold([gun, scope], armature, M, lambda: updates.append(1), M("marker"))
 
     assert (gun.parent, gun.parent_type, gun.parent_bone) == (armature, "BONE", "b_r_grip")
-    assert gun.matrix_world.name == "[loc(arm*grip),rot(arm*grip),(1, 1, 1)]*gun"
-    assert scope.matrix_world.name == "[loc(arm*grip),rot(arm*grip),(1, 1, 1)]*scope"
+    assert gun.matrix_world.name == "[loc(arm*grip),rot(arm*grip),(1, 1, 1)]*marker*gun", "the gun turned by the hand's weapon marker"
+    assert scope.matrix_world.name == "[loc(arm*grip),rot(arm*grip),(1, 1, 1)]*marker*scope"
     assert len(updates) == 2, "once to read the hand, once after parenting every mesh"
 
 

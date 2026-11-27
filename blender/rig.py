@@ -67,6 +67,9 @@ def has_light(rgba):
 
 # A weapon's model origin is its grip; the game's rig moves this bone to where the right hand holds it.
 WEAPON_BONE = "b_r_grip"
+# The rotation of the Spartan model's primary_weapon marker on that bone (spartan_armor), w first: how a held weapon sits in the
+# hand. Without it the gun points along the bone instead of across the body, and the off hand misses its foregrip.
+PRIMARY_WEAPON_ROTATION = (0.638, -0.02, 0.029, 0.769)
 
 
 def add_visibility_clips(objects, shown, new_action):
@@ -145,11 +148,12 @@ def select_only(objects, chosen):
         x.select_set(True)
 
 
-def hold(objects, armature, matrix, update):
-    # The model's origin is its grip: parent it to the grip bone where the pose puts it, so it follows whatever pose plays.
+def hold(objects, armature, matrix, update, offset):
+    # The model's origin is its grip: parent it to the grip bone where the pose puts it, turned by the hand's weapon marker,
+    # so it follows whatever pose plays.
     update()
     location, rotation, _ = (armature.matrix_world @ armature.pose.bones[WEAPON_BONE].matrix).decompose()
-    hand = matrix.LocRotScale(location, rotation, (1, 1, 1))
+    hand = matrix.LocRotScale(location, rotation, (1, 1, 1)) @ offset
     placed = [hand @ x.matrix_world for x in objects]
     for x in objects:
         x.parent, x.parent_type, x.parent_bone = armature, "BONE", WEAPON_BONE

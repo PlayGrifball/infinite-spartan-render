@@ -308,7 +308,7 @@ else:
     load_clip(stance_path, "stance")
 sc.frame_set(1)
 if weapon_objs:
-    rig.hold(weapon_objs, armature, mathutils.Matrix, bpy.context.view_layer.update)
+    rig.hold(weapon_objs, armature, mathutils.Matrix, bpy.context.view_layer.update, mathutils.Quaternion(rig.PRIMARY_WEAPON_ROTATION).to_matrix().to_4x4())
     if output == "glb":
         rig.add_visibility_clips(weapon_objs, {"neutral": False, "stance": True}, bpy.data.actions.new)
     keep += weapon_objs
