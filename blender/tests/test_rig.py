@@ -343,11 +343,11 @@ def test_aim_rotation_turns_one_direction_onto_another():
 
 
 def test_a_two_handed_hold_turns_the_gun_so_its_foregrip_points_at_the_off_hand():
-    turn = rig.off_hand_turn(grip=(0, 0, 0), foregrip=(0.3, 0, 0), off_grip=(0, 0.3, 0.05), reach=0.5)
+    turn = rig.off_hand_turn(grip=(0, 0, 0), foregrip=(0.3, 0, 0), off_grip=(0.25, 0.1, 0.05))
 
     aimed = apply(turn, (0.3, 0, 0))
-    length = (0.3 ** 2 + 0.05 ** 2) ** 0.5
-    assert close(aimed, (0, 0.3 * 0.3 / length, 0.3 * 0.05 / length))
+    length = (0.25 ** 2 + 0.1 ** 2 + 0.05 ** 2) ** 0.5
+    assert close(aimed, (0.3 * 0.25 / length, 0.3 * 0.1 / length, 0.3 * 0.05 / length))
 
 
 def test_a_one_handed_hold_leaves_the_gun_alone():
@@ -387,3 +387,66 @@ def test_a_material_whose_shader_was_not_extracted_is_reported_so_it_can_be_draw
     rig.apply_materials([slot("21"), slot("22")], tmp_path, FakeMaterials(), lambda p: reads[p.stem], set(), set(), [], unknown)
 
     assert unknown == {"21"}
+
+
+def test_no_turn_for_a_foregrip_at_the_grip_or_a_turn_too_large_to_be_a_hold():
+    assert rig.off_hand_turn(grip=(0, 0, 0), foregrip=(0.02, 0, 0), off_grip=(0.03, 0.01, 0)) is None, "cupped pistol hands"
+    assert rig.off_hand_turn(grip=(0, 0, 0), foregrip=(0.3, 0, 0), off_grip=(0, 0, 0)) is None, "off hand at the grip"
+    assert rig.off_hand_turn(grip=(0, 0, 0), foregrip=(0.2, 0, 0), off_grip=(0.05, 0.2, 0), reach=1) is None, "a 76 degree swing"
+
+
+def test_an_empty_marker_rotation_is_no_turn():
+    t, q = rig.hand_offset({"right_hand_spartan": ((0, 0, 0), (0, 0, 0, 0))})
+
+    assert close(q, rig._wxyz(rig.SPARTAN_WEAPON_MARKER[1]))
+
+
+def test_a_marker_is_placed_through_its_node():
+    instance = SimpleNamespace(node_index=4, position=SimpleNamespace(vector=(0.1, 0, 0)), rotation=SimpleNamespace(vector=(0, 0, 0, 1)))
+    model = SimpleNamespace(markers=[SimpleNamespace(name="left_hand_spartan", instances=[instance])])
+    seen = []
+
+    def place(node, position, rotation):
+        seen.append(node)
+        return (position[0] + 0.2, position[1], position[2]), rotation
+
+    markers = rig.markers_of(model, place)
+
+    assert seen == [4]
+    assert close(markers["left_hand_spartan"][0], (0.3 * rig.UNIT, 0, 0))
+
+
+class Vec(tuple):
+    def __neg__(self):
+        return Vec(-x for x in self)
+
+
+class Mat:
+    # A 4x4 stand-in for mathutils.Matrix, enough for both_hands
+    def __init__(self, rows):
+        self.rows = [list(r) for r in rows]
+
+    def to_4x4(self):
+        return Mat([r + [0] for r in self.rows] + [[0, 0, 0, 1]])
+
+    @classmethod
+    def Translation(cls, v):
+        return cls([[1, 0, 0, v[0]], [0, 1, 0, v[1]], [0, 0, 1, v[2]], [0, 0, 0, 1]])
+
+    def __matmul__(self, other):
+        if isinstance(other, Mat):
+            return Mat([[sum(self.rows[i][k] * other.rows[k][j] for k in range(4)) for j in range(4)] for i in range(4)])
+        return Vec(sum(self.rows[i][k] * (list(other) + [1])[k] for k in range(4)) for i in range(3))
+
+
+def test_both_hands_turns_the_gun_about_its_grip_point_onto_the_off_hand():
+    hand = Mat.Translation((1, 0, 0))
+    pivot = Vec((1, 0, 0))
+
+    turned = rig.both_hands(hand, pivot, off_grip=(1.25, 0.1, 0), foregrip=(0.3, 0, 0), matrix=Mat)
+
+    assert close(turned @ (0, 0, 0), (1, 0, 0)), "the grip stays put"
+    aimed = turned @ (0.3, 0, 0)
+    length = (0.25 ** 2 + 0.1 ** 2) ** 0.5
+    assert close(aimed, (1 + 0.3 * 0.25 / length, 0.3 * 0.1 / length, 0))
+    assert rig.both_hands(hand, pivot, (1.25, 0.1, 0), None, Mat) is hand

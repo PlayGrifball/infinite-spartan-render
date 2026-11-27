@@ -265,7 +265,7 @@ def glow(material):
     out = tree.nodes.new("ShaderNodeOutputMaterial")
     emit = tree.nodes.new("ShaderNodeEmission")
     emit.inputs["Color"].default_value = (0.45, 0.75, 1.0, 1.0)
-    emit.inputs["Strength"].default_value = 4.0
+    emit.inputs["Strength"].default_value = 1.0
     tree.links.new(emit.outputs["Emission"], out.inputs["Surface"])
 
 
@@ -280,7 +280,18 @@ if weapon:
         sys.exit(f"No model for weapon '{weapon}' in the data folder")
     importer = importlib.import_module(MOD + ".src.model.importer.model_importer").ModelImporter()
     meshes = [x for x in importer.start_import(str(model), bones=False) if x.type == "MESH"]
-    weapon_markers = rig.markers_of(importer.model)
+    nodes = importlib.import_module(MOD + ".src.model.importer.bone").get_bone_transforms(importer.model) if importer.model.bones else []
+
+    def place(node, position, rotation):
+        # A marker is relative to its node (a pump or a hammer head may hold the foregrip): put it in the model's space
+        if node >= len(nodes):
+            return position, rotation
+        x, y, z, w = rotation
+        local = mathutils.Matrix.LocRotScale(position, mathutils.Quaternion((w, x, y, z)), (1, 1, 1))
+        loc, rot, _ = (nodes[node] @ local).decompose()
+        return tuple(loc), (rot.x, rot.y, rot.z, rot.w)
+
+    weapon_markers = rig.markers_of(importer.model, place)
     foregrip = weapon_markers.get(rig.FOREGRIP_MARKER, (None,))[0]
     weapon_objs = rig.keep_default_build(meshes, lambda x: prop_id(x, "permutation_name"), lambda x: bpy.data.objects.remove(x, do_unlink=True), sc.collection.objects.link)
     rig.own_materials(weapon_objs, keep)
@@ -327,15 +338,10 @@ sc.frame_set(1)
 
 
 def both_hands(hand):
-    # A two-handed pose: turn the gun about the grip so its foregrip points at the off hand's grip bone
-    if foregrip is None:
-        return hand
-    grip = armature.matrix_world @ armature.pose.bones[rig.WEAPON_BONE].head
+    # Turned about the weapon's own grip point, so a two-handed pose puts the foregrip in the off hand
+    pivot = hand @ mathutils.Vector(rig.hand_marker(weapon_markers)[0])
     off_grip = armature.matrix_world @ armature.pose.bones[rig.OFF_HAND_BONE].head
-    turn = rig.off_hand_turn(tuple(grip), tuple(hand @ mathutils.Vector(foregrip)), tuple(off_grip))
-    if turn is None:
-        return hand
-    return mathutils.Matrix.Translation(grip) @ mathutils.Matrix(turn).to_4x4() @ mathutils.Matrix.Translation(-grip) @ hand
+    return rig.both_hands(hand, pivot, off_grip, mathutils.Vector(foregrip) if foregrip else None, mathutils.Matrix)
 
 
 if weapon_objs:

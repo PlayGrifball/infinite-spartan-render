@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 
@@ -195,13 +196,17 @@ OFF_HAND_BONE = "b_l_grip"
 FOREGRIP_MARKER = "left_hand_spartan"
 
 
-def markers_of(model):
-    # A model's markers by name: (position in metres, rotation x, y, z, w), from each one's first instance.
+def markers_of(model, place=None):
+    # A model's markers by name: (position in metres, rotation x, y, z, w), from each one's first instance. A marker is
+    # relative to its node; place(node, position, rotation) puts it in the model's space (the node's rest transform).
     out = {}
     for marker in model.markers:
         if marker.instances:
             first = marker.instances[0]
-            out[str(marker.name)] = (tuple(v * UNIT for v in first.position.vector), tuple(first.rotation.vector))
+            position, rotation = tuple(first.position.vector), tuple(first.rotation.vector)
+            if place:
+                position, rotation = place(first.node_index, position, rotation)
+            out[str(marker.name)] = (tuple(v * UNIT for v in position), tuple(rotation))
     return out
 
 
@@ -218,10 +223,15 @@ def _rotate(q, v):
 
 
 def _wxyz(xyzw):
-    # Stored rounded, so made unit length again
+    # Stored rounded, so made unit length again; an empty one is no turn
     x, y, z, w = xyzw
     n = (w * w + x * x + y * y + z * z) ** 0.5
-    return (w / n, x / n, y / n, z / n)
+    return (w / n, x / n, y / n, z / n) if n > 1e-9 else (1.0, 0.0, 0.0, 0.0)
+
+
+def hand_marker(weapon_markers):
+    # The weapon marker a Spartan's right hand holds: (position in metres, rotation x, y, z, w), at the origin when it has none.
+    return next((weapon_markers[n] for n in WEAPON_HAND_MARKERS if n in weapon_markers), ((0, 0, 0), (0, 0, 0, 1)))
 
 
 def hand_offset(weapon_markers):
@@ -229,7 +239,7 @@ def hand_offset(weapon_markers):
     # Returns (translation, rotation w, x, y, z).
     position, rotation = SPARTAN_WEAPON_MARKER
     spartan_t, spartan_q = tuple(v * UNIT for v in position), _wxyz(rotation)
-    hand = next((weapon_markers[n] for n in WEAPON_HAND_MARKERS if n in weapon_markers), ((0, 0, 0), (0, 0, 0, 1)))
+    hand = hand_marker(weapon_markers)
     hand_q = _wxyz(hand[1])
     q = _qmul(spartan_q, (hand_q[0], -hand_q[1], -hand_q[2], -hand_q[3]))
     moved = _rotate(q, hand[0])
@@ -238,6 +248,10 @@ def hand_offset(weapon_markers):
 
 # How far the pose's off-hand grip may be from a gun's foregrip and still be holding it; further, the hold is one-handed.
 TWO_HAND_REACH = 0.35
+# A foregrip (or off hand) closer to the grip than this is no direction to turn by (a pistol's cupped hands).
+MIN_ARM = 0.08
+# A larger turn than this means the off hand is not on the foregrip, whatever the distance.
+MAX_TURN_DEGREES = 60
 
 
 def _sub(a, b):
@@ -271,8 +285,26 @@ def aim_rotation(source, target):
             (t * x * z - s * y, t * y * z + s * x, t * z * z + c))
 
 
+def _length(v):
+    return sum(x * x for x in v) ** 0.5
+
+
 def off_hand_turn(grip, foregrip, off_grip, reach=TWO_HAND_REACH):
     # A two-handed hold: the turn about the grip that points the gun's foregrip at the pose's off-hand grip. None when one-handed.
-    if sum(d * d for d in _sub(foregrip, off_grip)) ** 0.5 > reach:
+    arm, target = _sub(foregrip, grip), _sub(off_grip, grip)
+    if _length(_sub(foregrip, off_grip)) > reach or _length(arm) < MIN_ARM or _length(target) < MIN_ARM:
         return None
-    return aim_rotation(_sub(foregrip, grip), _sub(off_grip, grip))
+    cos = sum(a * b for a, b in zip(_unit(arm), _unit(target)))
+    if cos < math.cos(math.radians(MAX_TURN_DEGREES)):
+        return None
+    return aim_rotation(arm, target)
+
+
+def both_hands(hand, pivot, off_grip, foregrip, matrix):
+    # The gun turned about its own grip point (pivot) so its foregrip (in the gun's space) points at the off hand's grip.
+    if foregrip is None:
+        return hand
+    turn = off_hand_turn(tuple(pivot), tuple(hand @ foregrip), tuple(off_grip))
+    if turn is None:
+        return hand
+    return matrix.Translation(pivot) @ matrix(turn).to_4x4() @ matrix.Translation(-pivot) @ hand
