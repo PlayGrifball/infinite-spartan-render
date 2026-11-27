@@ -78,9 +78,10 @@ def test_export_selects_everything_and_writes_a_rigged_glb_with_nla_clips():
     armature = SimpleNamespace(select_set=lambda v: selected.append(("armature", v)))
 
     rig.export_glb(lambda **k: exported.append(k), "out.glb", [obj], armature)
+    (options,) = exported
 
     assert selected == [("obj", True), ("armature", True)]
-    assert exported[0]["filepath"] == "out.glb"
-    assert exported[0]["export_skins"] is True
-    assert exported[0]["export_animations"] is True
-    assert exported[0]["export_animation_mode"] == "NLA_TRACKS"
+    assert options["filepath"] == "out.glb"
+    assert options["export_skins"] is True
+    assert options["export_animations"] is True
+    assert options["export_animation_mode"] == "NLA_TRACKS"
