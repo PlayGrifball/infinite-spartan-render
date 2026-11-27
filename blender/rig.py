@@ -215,8 +215,10 @@ def _rotate(q, v):
 
 
 def _wxyz(xyzw):
+    # Stored rounded, so made unit length again
     x, y, z, w = xyzw
-    return (w, x, y, z)
+    n = (w * w + x * x + y * y + z * z) ** 0.5
+    return (w / n, x / n, y / n, z / n)
 
 
 def hand_offset(weapon_markers):
