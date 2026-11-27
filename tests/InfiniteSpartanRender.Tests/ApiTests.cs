@@ -334,6 +334,35 @@ public class ApiTests
         }
     }
 
+    [Test]
+    public async Task AChangedPoseList_ChangesTheIdOfTheModelsWithExtraPoses_AndNoOther()
+    {
+        var folder = Scratch();
+        var poses = Path.Combine(folder, "poses.json");
+        await File.WriteAllTextAsync(Path.Combine(folder, "spartan.py"), "print(1)");
+        await File.WriteAllTextAsync(poses, """[{"pose":"A","stance":1,"weaponTag":null}]""");
+        _settings["Render:ScriptPath"] = Path.Combine(folder, "spartan.py");
+        _settings["Render:PosesPath"] = poses;
+        Start();
+        var before = await IdsAsync();
+
+        await File.WriteAllTextAsync(poses, """[{"pose":"A2","stance":1,"weaponTag":null}]""");
+        Start();
+        var after = await IdsAsync();
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(after.Model, Is.EqualTo(before.Model), "a model of the stance alone keeps its file");
+            Assert.That(after.Extra, Is.Not.EqualTo(before.Extra), "a model with extra poses is made again (a clip is named after its pose)");
+        }
+
+        async Task<(string? Model, string? Extra)> IdsAsync()
+        {
+            async Task<string?> IdOf(object body) => (await (await _client.PostAsJsonAsync("/spartans", body)).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+            return (await IdOf(Body(output: "glb")), await IdOf(new { core = "Mark VII", armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating = "1120495519", output = "glb", size = "small", extraPoses = new[] { 1 } }));
+        }
+    }
+
     private static object WithWeapon(string weapon) =>
         new { core = "Mark VII", armor = new Dictionary<string, string> { ["helmet"] = "Mk 7" }, coating = "1120495519", output = "png", size = "small", weapon };
 
@@ -612,6 +641,19 @@ public class ApiTests
     }
 
     [Test]
+    public async Task TheCatalog_ListsThePoses_WithTheWeaponEachHolds()
+    {
+        var folder = Scratch();
+        var poses = Path.Combine(folder, "poses.json");
+        await File.WriteAllTextAsync(poses, """[{"pose":"Captain's Pride","stance":11,"weaponTag":44604},{"pose":"Wave","stance":12,"weaponTag":null},{"pose":"Odd","stance":13,"weaponTag":9}]""");
+        var service = new CatalogService(Microsoft.Extensions.Options.Options.Create(new RenderOptions { CacheDirectory = Scratch(), DataDirectory = Scratch(), EkurAssets = Scratch(), WeaponsPath = await WeaponsFile(Scratch()), PosesPath = poses }));
+
+        var listed = service.Get("").Poses;
+
+        Assert.That(listed, Is.EqualTo(new[] { new CatalogPose("Captain's Pride", 11, "Energy Sword"), new CatalogPose("Wave", 12, null), new CatalogPose("Odd", 13, null) }));
+    }
+
+    [Test]
     public async Task TheCatalog_ListsNoWeapons_WhenTheWeaponsFileIsMalformed()
     {
         var file = Path.Combine(Scratch(), "weapons.json");
@@ -868,6 +910,60 @@ public class LoadoutTests
             Assert.That(set.Validate(OnlyX, null, JustCommando), Is.Null);
             Assert.That((set with { Weapon = "Nope" }).Validate(OnlyX, null, JustCommando), Does.Contain("weapon"));
             Assert.That(set.Id(), Is.Not.EqualTo((set with { WeaponCoating = "6" }).Id()));
+        }
+    }
+
+    private static readonly CatalogWeapon[] CommandoAndSword = [.. JustCommando, new("Energy Sword", null, [44604], ["9"])];
+    private static readonly CatalogPose[] TwoPoses = [new("Captain's Pride", 11, "Energy Sword"), new("Wave", 12, null)];
+    private static readonly List<int> SwordPose = [11];
+
+    [Test]
+    public void ExtraPoses_AreForAModel_FromThePoseList_AndEachWeaponCoatingMustBeOneOfThatWeaponsCoatings()
+    {
+        var model = new Loadout { Core = "x", Output = "glb", ExtraPoses = [11, 12], WeaponCoatings = new() { ["Energy Sword"] = "9", ["VK78 Commando Rifle"] = "5" } };
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(model.Validate(OnlyX, null, CommandoAndSword, TwoPoses), Is.Null);
+            Assert.That((model with { Output = "png" }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Does.Contain("extra poses need output glb"));
+            Assert.That((model with { ExtraPoses = [13] }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Does.Contain("extra poses must be stances from the catalog's poses"));
+            Assert.That((model with { ExtraPoses = [.. Enumerable.Range(0, 129)] }).Validate(OnlyX, null, CommandoAndSword, null), Does.Contain("at most 128"));
+            Assert.That((model with { WeaponCoatings = new() { ["Nope"] = "9" } }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Does.Contain("weapon coatings name a weapon from the catalog"));
+            Assert.That((model with { WeaponCoatings = new() { ["Energy Sword"] = "5" } }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Does.Contain("weapon coatings are each one of that weapon's coatings"));
+            Assert.That((model with { WeaponCoatings = null, ExtraPoses = null }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Is.Null);
+        }
+    }
+
+    [Test]
+    public void ExtraPosesAndTheWeaponCoatings_ChangeTheId_WhateverTheOrder()
+    {
+        var model = new Loadout { Core = "x", Output = "glb", ExtraPoses = [1, 2], WeaponCoatings = new() { ["A"] = "1", ["B"] = "2" } };
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(model.Id(), Is.Not.EqualTo((model with { ExtraPoses = [1] }).Id()));
+            Assert.That(model.Id(), Is.EqualTo((model with { ExtraPoses = [2, 1] }).Id()));
+            Assert.That(model.Id(), Is.Not.EqualTo((model with { WeaponCoatings = new() { ["A"] = "1" } }).Id()));
+            Assert.That(model.Id(), Is.EqualTo((model with { WeaponCoatings = new() { ["B"] = "2", ["A"] = "1" } }).Id()));
+            Assert.That(new Loadout { Core = "x", WeaponCoatings = new(), ExtraPoses = [] }.Id(), Is.EqualTo(new Loadout { Core = "x" }.Id()), "empty lists are no extras");
+        }
+    }
+
+    [Test]
+    public void ASetGivesItsExtraPosesAndTheWeaponCoatingsToItsModelOnly()
+    {
+        var set = new SpartanSetRequest { Core = "x", Stance = 7, ExtraPoses = SwordPose, WeaponCoatings = new() { ["Energy Sword"] = "9" } };
+
+        var items = set.Items().ToDictionary(i => i.Name, i => i.Loadout);
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That((items["glb"].ExtraPoses, items["glb"].WeaponCoatings), Is.EqualTo((set.ExtraPoses, set.WeaponCoatings)));
+            foreach (var name in new[] { "stance-body", "stance-head", "neutral-body", "neutral-head" })
+                Assert.That((items[name].ExtraPoses, items[name].WeaponCoatings), Is.EqualTo(((List<int>?)null, (Dictionary<string, string>?)null)), name);
+            Assert.That(set.Validate(OnlyX, null, CommandoAndSword, TwoPoses), Is.Null);
+            Assert.That((set with { WeaponCoatings = new() { ["Nope"] = "1" } }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Does.Contain("weapon coatings"));
+            Assert.That((set with { ExtraPoses = [13] }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Does.Contain("extra poses"));
         }
     }
 

@@ -32,10 +32,17 @@ public sealed record Loadout
     public string? Weapon { get; init; }
     // A coating id from the weapon's stylelists; empty means the weapon's default coating.
     public string? WeaponCoating { get; init; }
+    // More clips for a model: StanceIds from the catalog's poses, each clip named after its pose and holding its weapon (output glb only).
+    public List<int>? ExtraPoses { get; init; }
+    // Weapon name to coating id, for the weapons the extra poses hold other than Weapon (which wears WeaponCoating).
+    public Dictionary<string, string>? WeaponCoatings { get; init; }
 
     private static readonly Regex CoatingId = new(@"^-?\d{1,12}$", RegexOptions.Compiled);
 
-    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null, IReadOnlyCollection<CatalogWeapon>? weapons = null)
+    public bool HasExtraPoses => ExtraPoses is { Count: > 0 };
+
+    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null, IReadOnlyCollection<CatalogWeapon>? weapons = null,
+        IReadOnlyCollection<CatalogPose>? poses = null)
     {
         if (string.IsNullOrWhiteSpace(Core) || Core.Length > 64) return "core is required (at most 64 characters)";
         if (!cores.Contains(Core)) return $"core must be one of: {string.Join(", ", cores)}";
@@ -46,7 +53,17 @@ public sealed record Loadout
         if (Output is not ("png" or "glb")) return "output must be png or glb";
         if (Size is not ("small" or "full")) return "size must be small or full";
         if (Framing is not ("body" or "head")) return "framing must be body or head";
+        if (PosesProblem(poses) is { } extra) return extra;
+        if (ModelProblem(weapons) is { } model) return model;
         return null;
+    }
+
+    private string? PosesProblem(IReadOnlyCollection<CatalogPose>? poses)
+    {
+        if (!HasExtraPoses) return null;
+        if (Output != "glb") return "extra poses need output glb";
+        if (ExtraPoses!.Count > 128) return "extra poses has at most 128 entries";
+        return poses is not null && ExtraPoses.Any(s => poses.All(p => p.Stance != s)) ? "extra poses must be stances from the catalog's poses" : null;
     }
 
     private string? WeaponProblem(IReadOnlyCollection<CatalogWeapon>? weapons)
@@ -58,6 +75,18 @@ public sealed record Loadout
         if (string.IsNullOrEmpty(Weapon)) return "weapon coating needs a weapon";
         // Ekur silently renders the default for a coating the weapon's stylelists lack, which would cache a wrong render under this id
         return weapon is not null && !weapon.Coatings.Contains(WeaponCoating) ? "weapon coating must be one of that weapon's coatings" : null;
+    }
+
+    private string? ModelProblem(IReadOnlyCollection<CatalogWeapon>? weapons)
+    {
+        if (WeaponCoatings is null || weapons is null) return null;
+        if (WeaponCoatings.Count > 64) return "weapon coatings has at most 64 entries";
+        foreach (var (name, coat) in WeaponCoatings)
+        {
+            if (weapons.FirstOrDefault(w => w.Name == name) is not { } weapon) return "weapon coatings name a weapon from the catalog";
+            if (coat is null || !weapon.Coatings.Contains(coat)) return "weapon coatings are each one of that weapon's coatings";
+        }
+        return null;
     }
 
     private string? PiecesProblem()
@@ -95,6 +124,8 @@ public sealed record Loadout
             stance = Stance,
             weapon = string.IsNullOrEmpty(Weapon) ? "" : Weapon,
             weaponCoating = string.IsNullOrEmpty(WeaponCoating) ? "" : WeaponCoating,
+            extraPoses = (ExtraPoses ?? []).Distinct().Order(),
+            weaponCoatings = (WeaponCoatings ?? new()).OrderBy(w => w.Key, StringComparer.Ordinal).Select(w => new[] { w.Key, w.Value }),
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..32].ToLowerInvariant();
     }

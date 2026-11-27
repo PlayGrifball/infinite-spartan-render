@@ -18,6 +18,7 @@ import rig  # noqa: E402
 
 DATA = os.environ.get("ISR_DATA", "/data")
 WEAPONS = Path(os.environ.get("ISR_WEAPONS") or Path(sys.argv[sys.argv.index("--python") + 1]).resolve().parent / "weapons.json")
+POSES = Path(os.environ.get("ISR_POSES") or Path(sys.argv[sys.argv.index("--python") + 1]).resolve().parent / "poses.json")
 EKUR_ASSETS = "/opt/ekur/assets"
 DEFAULT_STANCE = -1258174396
 MOD = "bl_ext.user_default.ekur"
@@ -49,6 +50,9 @@ if stance_id is None:
 framing = loadout.get("Framing", "body")
 weapon = loadout.get("Weapon") or ""
 weapon_coating = loadout.get("WeaponCoating") or ""
+# A model can carry more poses of poses.json as clips (by stance id), each holding its weapon in the coating WeaponCoatings names
+extra_poses = set(loadout.get("ExtraPoses") or []) if output == "glb" else set()
+weapon_coatings = loadout.get("WeaponCoatings") or {}
 
 addon_utils.enable(MOD, default_set=True)
 bpy.context.preferences.addons[MOD].preferences.data_folder = DATA
@@ -271,16 +275,19 @@ def glow(material):
 
 apply_materials(done)
 
-weapon_objs = []
-foregrip = None
-weapon_markers = {}
-if weapon:
-    model = rig.weapon_model(WEAPONS, DATA, weapon)
+model_importer = importlib.import_module(MOD + ".src.model.importer.model_importer")
+bone_transforms = importlib.import_module(MOD + ".src.model.importer.bone").get_bone_transforms
+held = {}
+
+
+def import_weapon(name, weapon_coating):
+    # A weapon's default build in its coating, joined into one object (one set of baked textures), with its markers
+    model = rig.weapon_model(WEAPONS, DATA, name)
     if model is None:
-        sys.exit(f"No model for weapon '{weapon}' in the data folder")
-    importer = importlib.import_module(MOD + ".src.model.importer.model_importer").ModelImporter()
+        sys.exit(f"No model for weapon '{name}' in the data folder")
+    importer = model_importer.ModelImporter()
     meshes = [x for x in importer.start_import(str(model), bones=False) if x.type == "MESH"]
-    nodes = importlib.import_module(MOD + ".src.model.importer.bone").get_bone_transforms(importer.model) if importer.model.bones else []
+    nodes = bone_transforms(importer.model) if importer.model.bones else []
 
     def place(node, position, rotation):
         # A marker is relative to its node (a pump or a hammer head may hold the foregrip): put it in the model's space
@@ -291,20 +298,33 @@ if weapon:
         loc, rot, _ = (nodes[node] @ local).decompose()
         return tuple(loc), (rot.x, rot.y, rot.z, rot.w)
 
-    weapon_markers = rig.markers_of(importer.model, place)
-    foregrip = weapon_markers.get(rig.FOREGRIP_MARKER, (None,))[0]
-    weapon_objs = rig.keep_default_build(meshes, lambda x: prop_id(x, "permutation_name"), lambda x: bpy.data.objects.remove(x, do_unlink=True), sc.collection.objects.link)
-    rig.own_materials(weapon_objs, keep)
-    rig.select_only(bpy.data.objects, weapon_objs)
+    markers = rig.markers_of(importer.model, place)
+    objs = rig.keep_default_build(meshes, lambda x: prop_id(x, "permutation_name"), lambda x: bpy.data.objects.remove(x, do_unlink=True), sc.collection.objects.link)
+    rig.own_materials(objs, keep + [e["obj"] for e in held.values()])
+    rig.select_only(bpy.data.objects, objs)
     mp.use_default_coating = not weapon_coating
     mp.coating_id = weapon_coating
     mp.override_visor = False
-    weapon_done, weapon_unknown = set(), set()
-    apply_materials(weapon_done, weapon_unknown)
-    for material in {s.material for x in weapon_objs for s in x.material_slots if s.material and s.material.name.split(".")[0] in weapon_unknown}:
+    applied, unknown = set(), set()
+    apply_materials(applied, unknown)
+    for material in {s.material for x in objs for s in x.material_slots if s.material and s.material.name.split(".")[0] in unknown}:
         glow(material)
-    done |= weapon_done
-    print("WEAPON", weapon, model.name, len(weapon_objs), "meshes", flush=True)
+    done.update(applied)
+    rig.select_only(bpy.data.objects, objs)
+    bpy.context.view_layer.objects.active = objs[0]
+    if len(objs) > 1:
+        bpy.ops.object.join()
+    obj = bpy.context.view_layer.objects.active
+    obj.name = f"weapon {name}"
+    obj.rotation_mode = "QUATERNION"
+    print("WEAPON", name, model.name, len(objs), "meshes", flush=True)
+    return {"obj": obj, "markers": markers, "coating": weapon_coating, "rest": obj.matrix_world.copy()}
+
+
+pose_list = [p for p in rig.pose_clips(json.loads(POSES.read_text()), json.loads(WEAPONS.read_text())) if p[1] in extra_poses] if extra_poses else []
+for name in dict.fromkeys(([weapon] if weapon else []) + [w for _, _, w in pose_list if w]):
+    held[name] = import_weapon(name, weapon_coating if name == weapon else weapon_coatings.get(name, ""))
+weapon_of = {e["obj"]: (name, e["coating"]) for name, e in held.items()}
 print("MATS", len(done), "missing", sorted(missing))
 phase("materials")
 if problems:
@@ -327,43 +347,66 @@ def load_clip(path, name):
     return rig.read_clip(anim_data, anim_import, armature, path, name)
 
 
+def in_hand(entry):
+    # Where a held weapon goes in the current pose: on the grip by its hand marker, then turned about its own grip point
+    # so a two-handed pose puts the foregrip in the off hand
+    markers = entry["markers"]
+    offset, turn = rig.hand_offset(markers)
+    hand = rig.hand_matrix(armature, mathutils.Matrix, mathutils.Matrix.LocRotScale(offset, mathutils.Quaternion(turn), (1, 1, 1)))
+    foregrip = markers.get(rig.FOREGRIP_MARKER, (None,))[0]
+    pivot = hand @ mathutils.Vector(rig.hand_marker(markers)[0])
+    off_grip = armature.matrix_world @ armature.pose.bones[rig.OFF_HAND_BONE].head
+    return rig.both_hands(hand, pivot, off_grip, mathutils.Vector(foregrip) if foregrip else None, mathutils.Matrix) @ entry["rest"]
+
+
+# Which weapon each clip holds: the player's in their stance, none in the neutral pose, each listed pose its own
+clip_weapon = {"neutral": None, "stance": weapon or None, **{title: w for title, _, w in pose_list}}
+
+
+def posed(name):
+    # Every weapon is keyed into every clip: in the hand where the pose holds it, scaled to nothing elsewhere
+    sc.frame_set(1)
+    bpy.context.view_layer.update()
+    for wname, entry in held.items():
+        shown = clip_weapon.get(name) == wname
+        if shown:
+            entry["obj"].matrix_world = in_hand(entry)
+        rig.key_clip(entry["obj"], name, shown, bpy.data.actions.new)
+
+
 if output == "glb":
     neutral_path = rig.find_stance(DATA, DEFAULT_STANCE)
     if neutral_path is None:
         sys.exit(f"The default stance {DEFAULT_STANCE} is missing from the data folder")
-    rig.add_pose_clips(armature, (("neutral", neutral_path), ("stance", stance_path)), load_clip)
+    # Held weapons follow the grip bone, so whatever clip plays moves them with the hand
+    for entry in held.values():
+        obj = entry["obj"]
+        obj.parent, obj.parent_type, obj.parent_bone = armature, "BONE", rig.WEAPON_BONE
+    bpy.context.view_layer.update()
+    clips = [("neutral", neutral_path), ("stance", stance_path)]
+    clips += [(title, path) for title, stance, _ in pose_list if (path := rig.find_stance(DATA, stance))]
+    rig.add_pose_clips(armature, clips, load_clip, posed)
 else:
     load_clip(stance_path, "stance")
-sc.frame_set(1)
-
-
-def both_hands(hand):
-    # Turned about the weapon's own grip point, so a two-handed pose puts the foregrip in the off hand
-    pivot = hand @ mathutils.Vector(rig.hand_marker(weapon_markers)[0])
-    off_grip = armature.matrix_world @ armature.pose.bones[rig.OFF_HAND_BONE].head
-    return rig.both_hands(hand, pivot, off_grip, mathutils.Vector(foregrip) if foregrip else None, mathutils.Matrix)
-
-
-if weapon_objs:
-    offset, turn = rig.hand_offset(weapon_markers)
-    rig.hold(weapon_objs, armature, mathutils.Matrix, bpy.context.view_layer.update,
-             mathutils.Matrix.LocRotScale(offset, mathutils.Quaternion(turn), (1, 1, 1)), both_hands)
-    if output == "glb":
-        rig.add_visibility_clips(weapon_objs, {"neutral": False, "stance": True}, bpy.data.actions.new)
-    keep += weapon_objs
+    sc.frame_set(1)
+    bpy.context.view_layer.update()
+    if weapon:
+        held[weapon]["obj"].matrix_world = in_hand(held[weapon])
+keep += [e["obj"] for e in held.values()]
 phase("pose")
 
 
 SCRIPTS = [Path(sys.argv[sys.argv.index("--python") + 1]).resolve(), Path(sys.argv[sys.argv.index("--python") + 1]).resolve().parent / "rig.py"]
 
 
-def bake_folder(size, held):
+def bake_folder(size, obj):
     # The baked textures depend on the loadout, not the stance (a pose moves vertices, not UVs): the armor's per armor, a held weapon's per weapon.
     cache = os.environ.get("ISR_BAKE_CACHE")
     if not cache:
         return None
-    if held:
-        return rig.bake_key(cache, SCRIPTS, "weapon", [tool_version(), rig.weapon_entry(WEAPONS, weapon), weapon_coating, disable_damage, size])
+    if obj in weapon_of:
+        name, weapon_coat = weapon_of[obj]
+        return rig.bake_key(cache, SCRIPTS, "weapon", [tool_version(), rig.weapon_entry(WEAPONS, name), weapon_coat, disable_damage, size])
     return rig.bake_key(cache, SCRIPTS, "armor", [tool_version(), core, sorted(armor.items()), sorted(parts.items()), coating, visor, disable_damage, size])
 
 
@@ -399,7 +442,7 @@ def bake_to_plain_materials(size):
     sc.cycles.use_denoising = False
     passes = (("color", "DIFFUSE", "sRGB"), ("rough", "ROUGHNESS", "Non-Color"), ("normal", "NORMAL", "Non-Color"), ("emit", "EMIT", "sRGB"))
     for obj in keep:
-        folder = bake_folder(size, obj in weapon_objs)
+        folder = bake_folder(size, obj)
         files = {key: folder / f"{re.sub(r'[^A-Za-z0-9._-]+', '-', obj.name)}_{key}.png" for key, _, _ in passes} if folder else {}
         images = {}
         if files and all(f.exists() for f in files.values()):
@@ -456,9 +499,11 @@ def bake_to_plain_materials(size):
 
 if output == "glb":
     rig.show_armature_modifiers(keep)
+    rig.mute_clips(weapon_of, True)
     bpy.context.view_layer.update()
     phase("mesh")
     bake_to_plain_materials(rig.texture_size(full))
+    rig.mute_clips(weapon_of, False)
     rig.export_glb(bpy.ops.export_scene.gltf, out, keep, armature)
     phase("export")
     sys.exit(0)

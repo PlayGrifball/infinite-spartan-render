@@ -39,9 +39,19 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
 
     public Catalog Catalog() => catalog.Get(_renderer.Value);
 
+    // A model with extra poses names its clips after the poses and holds their weapons: the pose and weapon lists join its renderer
+    private readonly Lazy<string> _poses = new(() =>
+    {
+        var files = new[] { options.Value.PosesPath, options.Value.WeaponsPath }.Where(File.Exists);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(files.SelectMany(File.ReadAllBytes).ToArray()))[..12];
+    });
+
     // A held weapon's own entry joins the renderer, so a changed entry renders the loadouts holding it again, and no other
     private string IdOf(Loadout loadout)
-        => loadout.Id(string.IsNullOrEmpty(loadout.Weapon) ? _renderer.Value : $"{_renderer.Value}|{catalog.WeaponIdentity(loadout.Weapon)}");
+    {
+        var renderer = string.IsNullOrEmpty(loadout.Weapon) ? _renderer.Value : $"{_renderer.Value}|{catalog.WeaponIdentity(loadout.Weapon)}";
+        return loadout.Id(loadout.HasExtraPoses ? $"{renderer}|poses {_poses.Value}" : renderer);
+    }
 
     // Done when the file is in the cache (survives restarts); otherwise whatever this process knows about the job.
     // A job lost to a restart is unknown here: the client posts the loadout again.

@@ -136,16 +136,49 @@ def fake_object(name, scale=(0.3, 0.3, 0.3)):
     return obj, animation, tracks, keys
 
 
-def test_a_weapon_is_scaled_to_nothing_in_the_clips_it_is_hidden_in_and_keeps_its_scale():
+def test_a_weapon_is_keyed_into_each_clip_and_scaled_to_nothing_where_it_is_not_held():
     gun, animation, tracks, keys = fake_object("gun")
 
-    rig.add_visibility_clips([gun], {"neutral": False, "stance": True}, lambda name: f"action-{name}")
+    rig.key_clip(gun, "neutral", False, lambda name: f"action-{name}")
+    rig.key_clip(gun, "stance", True, lambda name: f"action-{name}")
 
     assert [t.name for t in tracks] == ["neutral", "stance"]
     assert [t.strips.calls for t in tracks] == [[("new", ("neutral", 1, "action-gun-neutral"), {})], [("new", ("stance", 1, "action-gun-stance"), {})]]
-    assert keys == [("action-gun-neutral", "scale", 1, (0, 0, 0)), ("action-gun-stance", "scale", 1, (0.3, 0.3, 0.3))]
+    assert [(a, p, s) for a, p, _, s in keys if p == "scale"] == [("action-gun-neutral", "scale", (0, 0, 0)), ("action-gun-stance", "scale", (0.3, 0.3, 0.3))]
+    assert {p for _, p, _, _ in keys} == {"location", "rotation_quaternion", "scale"}, "where it is in that pose, not only whether"
     assert animation.action is None
     assert tuple(gun.scale) == (0.3, 0.3, 0.3)
+
+
+def test_a_baked_objects_clips_are_muted_and_unmuted():
+    tracks = [SimpleNamespace(mute=False), SimpleNamespace(mute=False)]
+    gun = SimpleNamespace(animation_data=SimpleNamespace(nla_tracks=tracks))
+
+    rig.mute_clips([gun, SimpleNamespace(animation_data=None)], True)
+    muted = [t.mute for t in tracks]
+    rig.mute_clips([gun], False)
+
+    assert muted == [True, True] and [t.mute for t in tracks] == [False, False]
+
+
+def test_the_all_poses_clips_name_each_pose_and_its_weapon():
+    poses = [{"pose": "Noble Command", "stance": 1, "weaponTag": -40348340}, {"pose": "Wave", "stance": 2, "weaponTag": None}, {"pose": "Odd", "stance": 3, "weaponTag": 9}]
+    weapons = [{"name": "VK78 Commando Rifle", "tags": [-40348340]}]
+
+    assert rig.pose_clips(poses, weapons) == [("Noble Command", 1, "VK78 Commando Rifle"), ("Wave", 2, None), ("Odd", 3, None)]
+
+
+def test_each_pose_is_announced_while_it_is_the_rigs_action():
+    armature, animation, tracks, _ = fake_armature()
+    seen = []
+
+    def load(path, name):
+        animation.action = f"action-{name}"
+        return animation.action
+
+    rig.add_pose_clips(armature, [("neutral", "n"), ("stance", "s")], load, lambda name: seen.append((name, animation.action)))
+
+    assert seen == [("neutral", "action-neutral"), ("stance", "action-stance")]
 
 
 def test_a_weapon_is_held_on_the_right_hand_grip():
@@ -270,18 +303,12 @@ class M:
         return M(f"[{location},{rotation},{scale}]")
 
 
-def test_a_weapon_is_parented_to_the_grip_bone_where_the_pose_puts_the_hand():
-    updates = []
+def test_a_held_weapon_goes_on_the_grip_bone_where_the_pose_puts_it_moved_by_its_offset():
     armature = SimpleNamespace(matrix_world=M("arm"), pose=SimpleNamespace(bones={rig.WEAPON_BONE: SimpleNamespace(matrix=M("grip"))}))
-    gun = SimpleNamespace(matrix_world=M("gun"), parent=None, parent_type=None, parent_bone=None)
-    scope = SimpleNamespace(matrix_world=M("scope"), parent=None, parent_type=None, parent_bone=None)
 
-    rig.hold([gun, scope], armature, M, lambda: updates.append(1), M("marker"))
+    hand = rig.hand_matrix(armature, M, M("marker"))
 
-    assert (gun.parent, gun.parent_type, gun.parent_bone) == (armature, "BONE", "b_r_grip")
-    assert gun.matrix_world.name == "[loc(arm*grip),rot(arm*grip),(1, 1, 1)]*marker*gun", "the gun turned by the hand's weapon marker"
-    assert scope.matrix_world.name == "[loc(arm*grip),rot(arm*grip),(1, 1, 1)]*marker*scope"
-    assert len(updates) == 2, "once to read the hand, once after parenting every mesh"
+    assert hand.name == "[loc(arm*grip),rot(arm*grip),(1, 1, 1)]*marker", "unscaled grip, then the weapon's offset from it"
 
 
 class Material:
@@ -352,15 +379,6 @@ def test_a_two_handed_hold_turns_the_gun_so_its_foregrip_points_at_the_off_hand(
 
 def test_a_one_handed_hold_leaves_the_gun_alone():
     assert rig.off_hand_turn(grip=(0, 0, 0), foregrip=(0.3, 0, 0), off_grip=(-0.5, 0.4, -0.6)) is None
-
-
-def test_hold_lets_the_caller_adjust_the_hand_before_parenting():
-    armature = SimpleNamespace(matrix_world=M("arm"), pose=SimpleNamespace(bones={rig.WEAPON_BONE: SimpleNamespace(matrix=M("grip"))}))
-    gun = SimpleNamespace(matrix_world=M("gun"), parent=None, parent_type=None, parent_bone=None)
-
-    rig.hold([gun], armature, M, lambda: None, M("marker"), adjust=lambda hand: M(f"turned({hand.name})"))
-
-    assert gun.matrix_world.name == "turned([loc(arm*grip),rot(arm*grip),(1, 1, 1)]*marker)*gun"
 
 
 def test_a_models_markers_are_read_in_metres_from_their_first_instance():

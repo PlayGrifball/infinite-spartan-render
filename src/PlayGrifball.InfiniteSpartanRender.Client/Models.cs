@@ -41,6 +41,12 @@ public sealed record SpartanLoadout
 
     /// <summary>A coating id from the weapon's <c>coatings</c>; null or empty is the weapon's default coating. Needs <see cref="Weapon"/>.</summary>
     public string? WeaponCoating { get; init; }
+
+    /// <summary>More clips for a <c>glb</c>: stance ids from the catalog's <c>poses</c>, each clip named after its pose and holding its weapon.</summary>
+    public IList<int>? ExtraPoses { get; init; }
+
+    /// <summary>Weapon name to coating id, for the weapons the extra poses hold (other than <see cref="Weapon"/>, which wears <see cref="WeaponCoating"/>).</summary>
+    public IDictionary<string, string>? WeaponCoatings { get; init; }
 }
 
 /// <summary>A render job: <see cref="State"/> is queued, running, done or failed.</summary>
@@ -71,6 +77,12 @@ public sealed record SpartanSetRequest
     /// <summary>A coating id from the weapon's <c>coatings</c>; null or empty is its default coating.</summary>
     public string? WeaponCoating { get; init; }
 
+    /// <summary>More clips for the GLB: stance ids from the catalog's <c>poses</c>, each clip named after its pose and holding its weapon.</summary>
+    public IList<int>? ExtraPoses { get; init; }
+
+    /// <summary>Weapon name to coating id, for the weapons the extra poses hold.</summary>
+    public IDictionary<string, string>? WeaponCoatings { get; init; }
+
     public string Size { get; init; } = "small";
 }
 
@@ -98,5 +110,9 @@ public sealed record SpartanCatalogCore(string Name, IReadOnlyList<SpartanCatalo
 /// </summary>
 public sealed record SpartanCatalogWeapon(string Name, string? CoreType, IReadOnlyList<int> Tags, IReadOnlyList<string> Coatings);
 
+/// <summary>A pose a GLB can carry as a clip named <see cref="Name"/>: its stance id, and the weapon it holds (null for empty hands).</summary>
+public sealed record SpartanCatalogPose(string Name, int Stance, string? Weapon);
+
 /// <summary>What a loadout may name. <see cref="PendingCores"/> are still importing and join when their import is done.</summary>
-public sealed record SpartanCatalog(IReadOnlyList<SpartanCatalogCore> Cores, IReadOnlyList<string> Coatings, IReadOnlyList<string> Visors, IReadOnlyList<string> PendingCores, IReadOnlyList<SpartanCatalogWeapon>? Weapons = null);
+public sealed record SpartanCatalog(IReadOnlyList<SpartanCatalogCore> Cores, IReadOnlyList<string> Coatings, IReadOnlyList<string> Visors, IReadOnlyList<string> PendingCores,
+    IReadOnlyList<SpartanCatalogWeapon>? Weapons = null, IReadOnlyList<SpartanCatalogPose>? Poses = null);

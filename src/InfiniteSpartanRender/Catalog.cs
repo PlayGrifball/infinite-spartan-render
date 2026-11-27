@@ -14,8 +14,13 @@ public sealed record CatalogCore(string Name, IReadOnlyList<CatalogRegion> Regio
 // theme gives its coating (null for weapons with no customization), Coatings the coating ids of its stylelists.
 public sealed record CatalogWeapon(string Name, string? CoreType, IReadOnlyList<int> Tags, IReadOnlyList<string> Coatings);
 
-// What a loadout may name: cores with their pieces, coating ids, visor titles and weapons. PendingCores are still importing.
-public sealed record Catalog(IReadOnlyList<CatalogCore> Cores, IReadOnlyList<string> Coatings, IReadOnlyList<string> Visors, IReadOnlyList<string> PendingCores, IReadOnlyList<CatalogWeapon> Weapons);
+// A pose a model can carry as a clip (named Name), by its StanceId, and the weapon it holds (null for empty hands).
+public sealed record CatalogPose(string Name, int Stance, string? Weapon);
+
+// What a loadout may name: cores with their pieces, coating ids, visor titles, weapons and poses. PendingCores are still importing.
+public sealed record Catalog(IReadOnlyList<CatalogCore> Cores, IReadOnlyList<string> Coatings, IReadOnlyList<string> Visors, IReadOnlyList<string> PendingCores, IReadOnlyList<CatalogWeapon> Weapons, IReadOnlyList<CatalogPose> Poses);
+
+internal sealed record PoseEntry(string Pose, int Stance, int? WeaponTag);
 
 internal sealed record WeaponEntry(string Name, string Model, string? CoreType, int[] Tags, int[] Stylelists);
 
@@ -53,6 +58,7 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
         if (Directory.Exists(folder)) files.AddRange(Directory.EnumerateFiles(folder, "*.json").Order(StringComparer.Ordinal));
         files.Add(Path.Combine(o.EkurAssets, "all_visors.json"));
         files.Add(o.WeaponsPath);
+        files.Add(o.PosesPath);
         files.AddRange(WeaponEntries().Select(w => ModelPath(o.DataDirectory, w.Model)));
         return string.Join('\n', files.Select(FileSignature));
     }
@@ -66,7 +72,7 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
             var core = ReadCore(PathFor(name, renderer), name);
             if (core is null) pending.Add(name); else cores.Add(core);
         }
-        return new Catalog(cores, Coatings(o.DataDirectory), Visors(o.EkurAssets), pending, Weapons(o));
+        return new Catalog(cores, Coatings(o.DataDirectory), Visors(o.EkurAssets), pending, Weapons(o), Poses(o.PosesPath));
     }
 
     private static string FileSignature(string f) => new FileInfo(f) is { Exists: true } i ? $"{f}|{i.Length}|{i.LastWriteTimeUtc.Ticks}" : f + "|missing";
@@ -98,6 +104,18 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
     }
 
     private static string ModelPath(string dataDirectory, string model) => Path.Combine(dataDirectory, "models", model + ".ekur");
+
+    // Each pose with the name of the weapon its weaponTagId means (whether or not that weapon's model is in the data)
+    private List<CatalogPose> Poses(string file)
+    {
+        var byTag = WeaponEntries().SelectMany(w => (w.Tags ?? []).Select(t => (t, w.Name))).GroupBy(p => p.t).ToDictionary(g => g.Key, g => g.First().Name);
+        try
+        {
+            var poses = File.Exists(file) ? JsonSerializer.Deserialize<List<PoseEntry>>(File.ReadAllText(file), Web) ?? [] : [];
+            return [.. poses.Select(p => new CatalogPose(p.Pose, p.Stance, p.WeaponTag is int tag && byTag.TryGetValue(tag, out var name) ? name : null))];
+        }
+        catch (Exception e) when (e is JsonException or IOException) { return []; }
+    }
 
     private static List<WeaponEntry> ReadWeapons(string file)
     {

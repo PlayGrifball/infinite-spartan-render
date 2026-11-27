@@ -1,6 +1,7 @@
 # Run by Blender: blender -b --python pose_sheet.py (writes poses/ at the repository root)
 # Renders each weapon of weapon-poses.json in a pose that holds it, then lays the renders out in one sheet (sheet.png)
-# with a numbered legend (sheet.md), to check by eye that every weapon sits in the hands.
+# with a numbered legend (sheet.md), to check by eye that every weapon sits in the hands; then one model (all-poses.glb) with
+# every pose of poses.json as a clip, to scrub through in a glTF viewer.
 import json
 import os
 import subprocess
@@ -15,6 +16,12 @@ CELL = (350, 500)
 def loadouts(poses):
     for pose in poses:
         yield {"Core": "Mark VII", "Stance": pose["stance"], "Framing": "body", "Output": "png", "Size": "small", "Weapon": pose["weapon"]}
+
+
+def model_loadout(all_poses):
+    # The Commando in Noble Command, and every listed pose as a clip with its own weapon
+    return {"Core": "Mark VII", "Stance": 1756613951, "Output": "glb", "Size": "small", "Weapon": "VK78 Commando Rifle",
+            "ExtraPoses": [p["stance"] for p in all_poses]}
 
 
 def command(blender, loadout_path, png):
@@ -68,6 +75,10 @@ def main():
         pngs.append(png)
     compose(pngs, out / "sheet.png")
     (out / "sheet.md").write_text(legend(poses))
+    model = out / "all-poses.json"
+    model.write_text(json.dumps(model_loadout(json.loads((HERE / "poses.json").read_text()))))
+    done = subprocess.run(command(bpy.app.binary_path, model, out / "all-poses.glb"), env=os.environ, capture_output=True, text=True)
+    print(f"all poses: {'ok' if done.returncode == 0 else 'failed ' + done.stdout[-300:]}", flush=True)
 
 
 if __name__ == "__main__":

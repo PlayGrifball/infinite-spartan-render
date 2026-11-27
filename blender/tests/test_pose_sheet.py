@@ -35,3 +35,10 @@ def test_renders_fill_the_sheet_row_by_row():
 
 def test_the_legend_numbers_the_poses_in_sheet_order():
     assert pose_sheet.legend([{"weapon": "A", "pose": "P"}, {"weapon": "B", "pose": "Q"}]) == "1. A in P\n2. B in Q\n"
+
+
+def test_the_model_holds_the_commando_in_noble_command_with_every_pose_as_a_clip():
+    loadout = pose_sheet.model_loadout([{"pose": "A", "stance": 1, "weaponTag": None}, {"pose": "B", "stance": 2, "weaponTag": 5}])
+
+    assert (loadout["Output"], loadout["Weapon"], loadout["Stance"]) == ("glb", "VK78 Commando Rifle", 1756613951)
+    assert loadout["ExtraPoses"] == [1, 2]

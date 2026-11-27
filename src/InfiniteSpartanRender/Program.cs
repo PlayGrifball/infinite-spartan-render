@@ -79,7 +79,7 @@ app.MapHealthChecks("/health");
 // Ask for a render or a model; the answer is a job id, because a render takes minutes.
 app.MapPost("/spartans", (Loadout loadout, RenderService service, IOptions<RenderOptions> options, HttpResponse response) =>
 {
-    if (service.Catalog() is var catalog && loadout.Validate(options.Value.Cores, catalog.Visors, catalog.Weapons) is { } problem) return Results.BadRequest(new ErrorResponse(problem));
+    if (service.Catalog() is var catalog && loadout.Validate(options.Value.Cores, catalog.Visors, catalog.Weapons, catalog.Poses) is { } problem) return Results.BadRequest(new ErrorResponse(problem));
     if (service.Submit(loadout) is not { } status)
     {
         response.Headers.RetryAfter = "60";
@@ -128,7 +128,7 @@ app.MapGet("/spartans/{id}/file", (string id, RenderService service) =>
 // One Spartan in a chosen stance and in the neutral one: a GLB, a body PNG and a headshot PNG of each.
 app.MapPost("/spartan-sets", (SpartanSetRequest request, RenderService service, IOptions<RenderOptions> options, HttpResponse response) =>
 {
-    if (service.Catalog() is var catalog && request.Validate(options.Value.Cores, catalog.Visors, catalog.Weapons) is { } problem) return Results.BadRequest(new ErrorResponse(problem));
+    if (service.Catalog() is var catalog && request.Validate(options.Value.Cores, catalog.Visors, catalog.Weapons, catalog.Poses) is { } problem) return Results.BadRequest(new ErrorResponse(problem));
     if (service.SubmitSet(request) is not { } set)
     {
         response.Headers.RetryAfter = "60";

@@ -16,11 +16,14 @@ def read_clip(anim_data, anim_import, armature, path, name):
     clip.frames, clip.total_frames = clip.frames[:1], 1
     return anim_import.import_animation(armature, clip, name)
 
-def add_pose_clips(armature, clips, load):
+def add_pose_clips(armature, clips, load, posed=None):
     # One NLA track per pose, so the glTF exporter writes each as its own animation; the rig is left at rest.
+    # posed(name) runs while that pose is the rig's action, to key what follows it (a held weapon) into the same clip.
     animation = armature.animation_data_create()
     for name, path in clips:
         action = load(path, name)
+        if posed:
+            posed(name)
         track = animation.nla_tracks.new()
         track.name = name
         track.strips.new(name, 1, action)
@@ -77,20 +80,28 @@ WEAPON_HAND_MARKERS = ("right_hand_spartan", "right_hand")
 UNIT = 3.048
 
 
-def add_visibility_clips(objects, shown, new_action):
-    # Per object one NLA track per clip, named like the rig's, so the exporter merges them: scaled to nothing where hidden.
+def key_clip(obj, name, shown, new_action):
+    # The object as it is now, as one NLA track named like the rig's clip, so the exporter merges them; scaled to nothing
+    # when not shown. Its own transform is left as it was.
+    animation = obj.animation_data_create()
+    scale = tuple(obj.scale)
+    animation.action = new_action(f"{obj.name}-{name}")
+    if not shown:
+        obj.scale = (0, 0, 0)
+    for path in ("location", "rotation_quaternion", "scale"):
+        obj.keyframe_insert(data_path=path, frame=1)
+    track = animation.nla_tracks.new()
+    track.name = name
+    track.strips.new(name, 1, animation.action)
+    animation.action = None
+    obj.scale = scale
+
+
+def mute_clips(objects, mute):
+    # A baked object must be at its full size: its clips are muted while it bakes
     for obj in objects:
-        animation = obj.animation_data_create()
-        scale = tuple(obj.scale)
-        for name, visible in shown.items():
-            animation.action = new_action(f"{obj.name}-{name}")
-            obj.scale = scale if visible else (0, 0, 0)
-            obj.keyframe_insert(data_path="scale", frame=1)
-            track = animation.nla_tracks.new()
-            track.name = name
-            track.strips.new(name, 1, animation.action)
-            animation.action = None
-        obj.scale = scale
+        for track in obj.animation_data.nla_tracks if obj.animation_data else ():
+            track.mute = mute
 
 
 def apply_materials(slots, data, mo, read_material, done, missing, problems, unknown=None):
@@ -156,20 +167,10 @@ def select_only(objects, chosen):
         x.select_set(True)
 
 
-def hold(objects, armature, matrix, update, offset, adjust=None):
-    # The model's origin is its grip: parent it to the grip bone where the pose puts it, turned by the hand's weapon marker,
-    # so it follows whatever pose plays.
-    update()
+def hand_matrix(armature, matrix, offset):
+    # Where a held weapon's origin goes in the current pose: the grip bone, moved by the weapon's offset from it
     location, rotation, _ = (armature.matrix_world @ armature.pose.bones[WEAPON_BONE].matrix).decompose()
-    hand = matrix.LocRotScale(location, rotation, (1, 1, 1)) @ offset
-    if adjust:
-        hand = adjust(hand)
-    placed = [hand @ x.matrix_world for x in objects]
-    for x in objects:
-        x.parent, x.parent_type, x.parent_bone = armature, "BONE", WEAPON_BONE
-    update()
-    for x, world in zip(objects, placed):
-        x.matrix_world = world
+    return matrix.LocRotScale(location, rotation, (1, 1, 1)) @ offset
 
 
 def own_materials(objects, others):
@@ -308,3 +309,10 @@ def both_hands(hand, pivot, off_grip, foregrip, matrix):
     if turn is None:
         return hand
     return matrix.Translation(pivot) @ matrix(turn).to_4x4() @ matrix.Translation(-pivot) @ hand
+
+
+def pose_clips(poses, weapons):
+    # The clips of an all-poses model: each pose's title, stance and the weapon it holds (None for empty hands or an
+    # unmapped weapon).
+    by_tag = {tag: w["name"] for w in weapons for tag in w["tags"]}
+    return [(p["pose"], p["stance"], by_tag.get(p["weaponTag"])) for p in poses]

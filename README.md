@@ -53,6 +53,7 @@ rendered before costs nothing, and a GLB takes minutes. Sets, like jobs, do not 
   "coatings": [ "-1973444192", "..." ],   // style ids, the `coating` field
   "visors": [ "...titles..." ],
   "weapons": [ { "name": "VK78 Commando Rifle", "coreType": "WeaponCommando", "tags": [ -40348340 ], "coatings": [ "..." ] } ],
+  "poses": [ { "name": "Captain's Pride", "stance": -1420523120, "weapon": "Energy Sword" } ],
   "pendingCores": [ "Chimera" ] }          // still importing; they join when their import is done
 ```
 
@@ -68,6 +69,10 @@ A stance holds a weapon: the action pose item's `weaponTagId` is one of a catalo
 player's Halo weapon core whose equipped theme gives its coating (null for weapons with no customization). `weapon` puts it in the right hand;
 in a set it is in the stance renders and the GLB's `stance` clip only, never in the neutral pose. The list is `blender/weapons.json`;
 a weapon is in the catalog once its model is in the data folder.
+
+A `glb` (or a set's GLB) can carry more clips: `extraPoses` lists stance ids from the catalog's `poses` (`blender/poses.json`), and each
+clip is named after its pose and holds that pose's weapon, in the coating `weaponCoatings` (weapon name to coating id) gives it, else its
+default. Each weapon is baked once per coating and reused, so a few extra poses cost seconds once their weapons are baked.
 
 | size  | png                    | glb                       |
 |-------|------------------------|---------------------------|

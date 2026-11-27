@@ -1,5 +1,6 @@
 # Renders every weapon of blender/weapon-poses.json in a pose that holds it and lays them out in one sheet, to check by
-# eye that each sits in the hands before a change to the weapon code merges. Half an hour or more on the in-cluster
+# eye that each sits in the hands before a change to the weapon code merges, and one model with every pose as a clip
+# (all-poses.glb) to scrub through in a glTF viewer. Most of an hour on the in-cluster
 # runner, so it runs only when asked: add the pose-sheet label to a PR (each new label adds a run), or Actions > Pose
 # sheet > Run workflow once this file is on main.
 name: Pose sheet
@@ -37,7 +38,7 @@ jobs:
           {
             echo "### Weapon poses (${GITHUB_SHA:0:7})"
             echo
-            echo "The sheet is the \`sheet.png\` artifact, read left to right, top to bottom:"
+            echo "The sheet is the \`sheet.png\` artifact, read left to right, top to bottom; \`all-poses.glb\` has every pose as a clip:"
             echo
             cat poses/sheet.md
           } >> "$GITHUB_STEP_SUMMARY"
@@ -46,6 +47,14 @@ jobs:
         if: ${{ !cancelled() && hashFiles('poses/sheet.png') != '' }}
         with:
           path: poses/sheet.png
+          archive: false
+          retention-days: 30
+          overwrite: true
+      # Every pose as a clip with its weapon: open it in a glTF viewer and pick the animation
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() && hashFiles('poses/all-poses.glb') != '' }}
+        with:
+          path: poses/all-poses.glb
           archive: false
           retention-days: 30
           overwrite: true

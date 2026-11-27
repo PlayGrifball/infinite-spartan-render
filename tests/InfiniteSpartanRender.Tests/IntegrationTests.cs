@@ -27,6 +27,7 @@ public class IntegrationTests
         {
             ScriptPath = Path.Combine(dir!.FullName, "blender", "spartan.py"),
             WeaponsPath = Path.Combine(dir!.FullName, "blender", "weapons.json"),
+            PosesPath = Path.Combine(dir!.FullName, "blender", "poses.json"),
             WorkDirectory = Path.Combine(_work, "render"),
             CacheDirectory = Path.Combine(_work, "cache"),
             TimeoutSeconds = 1800,
@@ -191,6 +192,25 @@ public class IntegrationTests
     }
 
     private static readonly string[] Clips = ["neutral", "stance"];
+    private static readonly string[] HammerAndSwordClips = ["neutral", "stance", "Ruthless War Club", "Captain's Pride"];
+
+    [Test]
+    public async Task AGlbWithExtraPoses_HasAClipNamedAfterEachPose_AndTheirWeapons()
+    {
+        var output = Path.Combine(_work, "mark-vii-extra-poses.glb");
+
+        await _runner.RunAsync(new Loadout { Core = "Mark VII", Output = "glb", Stance = 1756613951, Weapon = "VK78 Commando Rifle", ExtraPoses = [-1887947697, -1420523120] }, output, CancellationToken.None);
+
+        Keep(output);
+        var bytes = await File.ReadAllBytesAsync(output);
+        var json = System.Text.Json.JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(bytes, 20, BitConverter.ToInt32(bytes, 12))).RootElement;
+        var nodes = json.GetProperty("nodes").EnumerateArray().Select(n => n.TryGetProperty("name", out var name) ? name.GetString() : null).ToList();
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(json.GetProperty("animations").EnumerateArray().Select(a => a.GetProperty("name").GetString()), Is.EquivalentTo(HammerAndSwordClips));
+            Assert.That(nodes, Does.Contain("weapon VK78 Commando Rifle").And.Contain("weapon Gravity Hammer").And.Contain("weapon Energy Sword"));
+        }
+    }
 
     [Test]
     public async Task TheSameArmorInAnotherStance_ReusesTheBakedTextures()

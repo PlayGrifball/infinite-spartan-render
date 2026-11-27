@@ -19,6 +19,9 @@ public sealed record SpartanSetRequest
     // The weapon the stance holds (and its coating): in the stance renders and the GLB's stance clip, never in the neutral pose.
     public string? Weapon { get; init; }
     public string? WeaponCoating { get; init; }
+    // More clips for the model: stances from the catalog's poses, each holding its weapon in the coating WeaponCoatings names.
+    public List<int>? ExtraPoses { get; init; }
+    public Dictionary<string, string>? WeaponCoatings { get; init; }
     public string Size { get; init; } = "small";
 
     // The five renders: body and head by pose, and the one GLB. A chosen stance equal to the neutral one is the neutral one.
@@ -33,14 +36,17 @@ public sealed record SpartanSetRequest
             items.Add(($"{pose}-body", basis with { Output = "png", Framing = "body" }));
             items.Add(($"{pose}-head", basis with { Output = "png", Framing = "head" }));
         }
-        items.Add(("glb", armed with { Output = "glb" }));
+        items.Add(("glb", armed with { Output = "glb", ExtraPoses = ExtraPoses, WeaponCoatings = WeaponCoatings }));
         return items;
     }
 
-    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null, IReadOnlyCollection<CatalogWeapon>? weapons = null)
+    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null, IReadOnlyCollection<CatalogWeapon>? weapons = null,
+        IReadOnlyCollection<CatalogPose>? poses = null)
     {
         if (Stance is null) return "stance is required";
-        return Items()[0].Loadout.Validate(cores, visors, weapons);
+        var items = Items();
+        // The stance renders carry the weapon; the model also the extra poses and their weapon coatings
+        return items[0].Loadout.Validate(cores, visors, weapons, poses) ?? items[^1].Loadout.Validate(cores, visors, weapons, poses);
     }
 
     public string Id(string renderer = "") => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(',', Items().Select(i => i.Loadout.Id(renderer))))))[..32].ToLowerInvariant();

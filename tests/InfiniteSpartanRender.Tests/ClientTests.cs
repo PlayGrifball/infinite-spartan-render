@@ -47,9 +47,9 @@ public class ClientTests
     }
 
     [Test]
-    public async Task GetCatalog_ReadsCoresPiecesCoatingsVisorsAndWeapons()
+    public async Task GetCatalog_ReadsCoresPiecesCoatingsVisorsWeaponsAndPoses()
     {
-        var stub = new Stub((_, _) => Reply(HttpStatusCode.OK, """{"cores":[{"name":"Mark VII","regions":[{"kind":"KIT","key":"helmet","region":-5,"pieces":[{"permutation":7,"name":null}]}]}],"coatings":["-1"],"visors":["V"],"pendingCores":["Yoroi"],"weapons":[{"name":"VK78 Commando Rifle","coreType":"WeaponCommando","tags":[-40348340],"coatings":["5"]}]}"""));
+        var stub = new Stub((_, _) => Reply(HttpStatusCode.OK, """{"cores":[{"name":"Mark VII","regions":[{"kind":"KIT","key":"helmet","region":-5,"pieces":[{"permutation":7,"name":null}]}]}],"coatings":["-1"],"visors":["V"],"pendingCores":["Yoroi"],"weapons":[{"name":"VK78 Commando Rifle","coreType":"WeaponCommando","tags":[-40348340],"coatings":["5"]}],"poses":[{"name":"Captain's Pride","stance":11,"weapon":"Energy Sword"}]}"""));
 
         var catalog = await ClientFor(stub).GetCatalogAsync();
 
@@ -61,6 +61,7 @@ public class ClientTests
             Assert.That((catalog.Coatings, catalog.Visors, catalog.PendingCores), Is.EqualTo((new[] { "-1" }, new[] { "V" }, new[] { "Yoroi" })));
             var weapon = catalog.Weapons!.Single();
             Assert.That((weapon.Name, weapon.CoreType, weapon.Tags.Single(), weapon.Coatings.Single()), Is.EqualTo(("VK78 Commando Rifle", "WeaponCommando", -40348340, "5")));
+            Assert.That(catalog.Poses!.Single(), Is.EqualTo(new SpartanCatalogPose("Captain's Pride", 11, "Energy Sword")));
         }
     }
 
