@@ -274,7 +274,7 @@ phase("materials")
 if problems:
     sys.exit("Materials failed, not rendering a degraded Spartan: " + "; ".join(problems))
 
-stance_path = next(iter(sorted((Path(DATA) / "stances").glob(f"anim_{stance_id}_*.ekuranim"))), None)
+stance_path = rig.find_stance(DATA, stance_id)
 armature = next((o for o in bpy.data.objects if o.type == "ARMATURE"), None)
 if armature is None or stance_path is None:
     sys.exit(f"The armature or stance {stance_id} is missing from the data folder")
@@ -292,7 +292,9 @@ def load_clip(path, name):
 
 
 if output == "glb":
-    neutral_path = next(iter(sorted((Path(DATA) / "stances").glob(f"anim_{DEFAULT_STANCE}_*.ekuranim"))), None)
+    neutral_path = rig.find_stance(DATA, DEFAULT_STANCE)
+    if neutral_path is None:
+        sys.exit(f"The default stance {DEFAULT_STANCE} is missing from the data folder")
     rig.add_pose_clips(armature, (("neutral", neutral_path), ("stance", stance_path)), load_clip)
 else:
     load_clip(stance_path, "stance")

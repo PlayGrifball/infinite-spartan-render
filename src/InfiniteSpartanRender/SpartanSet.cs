@@ -22,14 +22,15 @@ public sealed record SpartanSetRequest
     public IReadOnlyList<(string Name, Loadout Loadout)> Items()
     {
         int? chosen = Stance == NeutralStance ? null : Stance;
+        var shared = new Loadout { Core = Core, Armor = Armor, Parts = Parts, Coating = Coating, Visor = Visor, DisableDamage = DisableDamage, Size = Size };
         var items = new List<(string, Loadout)>();
         foreach (var (pose, stance) in new[] { ("stance", chosen), ("neutral", (int?)null) })
         {
-            var basis = new Loadout { Core = Core, Armor = Armor, Parts = Parts, Coating = Coating, Visor = Visor, DisableDamage = DisableDamage, Size = Size, Stance = stance };
+            var basis = shared with { Stance = stance };
             items.Add(($"{pose}-body", basis with { Output = "png", Framing = "body" }));
             items.Add(($"{pose}-head", basis with { Output = "png", Framing = "head" }));
         }
-        items.Add(("glb", new Loadout { Core = Core, Armor = Armor, Parts = Parts, Coating = Coating, Visor = Visor, DisableDamage = DisableDamage, Size = Size, Stance = chosen, Output = "glb" }));
+        items.Add(("glb", shared with { Stance = chosen, Output = "glb" }));
         return items;
     }
 

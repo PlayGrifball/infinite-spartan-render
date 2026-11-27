@@ -85,3 +85,24 @@ def test_export_selects_everything_and_writes_a_rigged_glb_with_nla_clips():
     assert options["export_skins"] is True
     assert options["export_animations"] is True
     assert options["export_animation_mode"] == "NLA_TRACKS"
+
+
+def test_find_stance_returns_the_first_matching_file_and_none_when_there_is_none(tmp_path):
+    stances = tmp_path / "stances"
+    stances.mkdir()
+    (stances / "anim_7_b.ekuranim").write_bytes(b"")
+    (stances / "anim_7_a.ekuranim").write_bytes(b"")
+
+    assert rig.find_stance(tmp_path, 7) == stances / "anim_7_a.ekuranim"
+    assert rig.find_stance(tmp_path, 8) is None
+
+
+def test_the_rest_pose_also_clears_euler_and_axis_angle_rotation():
+    armature, _, _, bones = fake_armature(1)
+    bones[0].rotation_euler = (1, 2, 3)
+    bones[0].rotation_axis_angle = (1, 0, 0, 1)
+
+    rig.add_pose_clips(armature, [], lambda path, name: None)
+
+    assert bones[0].rotation_euler == (0, 0, 0)
+    assert bones[0].rotation_axis_angle == (0, 0, 1, 0)
