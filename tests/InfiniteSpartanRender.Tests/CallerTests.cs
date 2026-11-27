@@ -67,8 +67,10 @@ public class CallerTests
     }
 
     private async Task WaitDone(HttpResponseMessage accepted)
+        => await WaitDone((await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!);
+
+    private async Task WaitDone(string id)
     {
-        var id = (await accepted.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
         for (var i = 0; i < 100; i++)
         {
             var state = (await _client.GetFromJsonAsync<JsonElement>($"/spartans/{id}")).GetProperty("state").GetString();
@@ -119,11 +121,12 @@ public class CallerTests
 
         var first = await Post("test-secret");
         var second = await Post("prod-secret");
-        _runner.Gate.SetResult();
-        await WaitDone(first);
-
         var firstId = (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
-        Assert.That((await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString(), Is.EqualTo(firstId));
+        var secondId = (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+        _runner.Gate.SetResult();
+        await WaitDone(firstId!);
+
+        Assert.That(secondId, Is.EqualTo(firstId));
         lock (counted) Assert.That(counted, Does.Contain(("joined", "grif-prod")));
     }
 
