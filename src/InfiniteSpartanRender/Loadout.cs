@@ -20,6 +20,8 @@ public sealed record Loadout
     public string? Coating { get; init; }
     // A visor title from the catalog; empty means the core's default visor.
     public string? Visor { get; init; }
+    // Ekur's Disable Damage: leaves out the 7th or 4th material zone, the layer of grime and wear.
+    public bool DisableDamage { get; init; }
     public string Output { get; init; } = "png";
     public string Size { get; init; } = "small";
     // body | head: the head frames the helmet only.
@@ -70,6 +72,7 @@ public sealed record Loadout
             parts = (Parts ?? new()).OrderBy(p => p.Region).Select(p => new[] { p.Region, p.Permutation }),
             coating = string.IsNullOrEmpty(Coating) ? "" : Coating,
             visor = string.IsNullOrEmpty(Visor) ? "" : Visor,
+            disableDamage = DisableDamage,
             output = Output,
             size = Size,
             framing = Framing,

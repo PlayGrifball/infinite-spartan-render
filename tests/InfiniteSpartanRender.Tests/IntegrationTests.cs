@@ -156,7 +156,7 @@ public class IntegrationTests
     }
 
     [Test]
-    public async Task APlayersStance_PosesTheGlb()
+    public async Task AGlb_KeepsTheRigWithAClipForEachPose()
     {
         var output = Path.Combine(_work, "mark-vii-stance.glb");
 
@@ -165,8 +165,17 @@ public class IntegrationTests
         Keep(output);
         var bytes = await File.ReadAllBytesAsync(output);
         Assert.That(System.Text.Encoding.ASCII.GetString(bytes, 0, 4), Is.EqualTo("glTF"));
-        Assert.That(bytes.Length, Is.GreaterThan(100_000));
+        var jsonLength = BitConverter.ToInt32(bytes, 12);
+        var json = System.Text.Json.JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(bytes, 20, jsonLength)).RootElement;
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(json.GetProperty("skins").GetArrayLength(), Is.GreaterThan(0), "the game rig is kept");
+            Assert.That(json.GetProperty("animations").EnumerateArray().Select(a => a.GetProperty("name").GetString()), Is.EquivalentTo(Clips));
+            Assert.That(bytes.Length, Is.GreaterThan(100_000));
+        }
     }
+
+    private static readonly string[] Clips = ["neutral", "stance"];
 
     [Test]
     public async Task TheSameArmorInAnotherStance_ReusesTheBakedTextures()

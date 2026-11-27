@@ -67,7 +67,7 @@ public sealed class InfiniteSpartanRenderClient(HttpClient http)
         return await ReadAsync<SpartanCatalog>(response, cancellationToken);
     }
 
-    /// <summary>Asks for the six files of a Spartan in a stance and in the neutral one.</summary>
+    /// <summary>Asks for the five files of a Spartan: body and head in a stance and in the neutral one, and one rigged GLB.</summary>
     public async Task<SpartanSet> SubmitSetAsync(SpartanSetRequest request, CancellationToken cancellationToken = default)
     {
         using var response = await http.PostAsJsonAsync("spartan-sets", request, Json, cancellationToken);

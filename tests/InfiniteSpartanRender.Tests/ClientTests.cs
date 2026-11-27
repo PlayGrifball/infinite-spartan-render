@@ -150,7 +150,7 @@ public class ClientTests
     [Test]
     public async Task ASet_IsSubmittedPolledAndItsItemsDownloadedByUrl()
     {
-        const string items = """[{"name":"stance-glb","state":"done","output":"glb","url":"/spartans/f1/file"}]""";
+        const string items = """[{"name":"glb","state":"done","output":"glb","url":"/spartans/f1/file"}]""";
         var stub = new Stub((r, _) => r.RequestUri!.AbsolutePath switch
         {
             "/spartan-sets" => Reply(HttpStatusCode.Accepted, $$"""{"id":"s1","state":"running","items":{{items}}}"""),

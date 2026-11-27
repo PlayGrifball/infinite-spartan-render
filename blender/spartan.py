@@ -13,6 +13,9 @@ import addon_utils
 import bpy
 import mathutils
 
+sys.path.insert(0, str(Path(sys.argv[sys.argv.index("--python") + 1]).resolve().parent))
+import rig  # noqa: E402
+
 DATA = os.environ.get("ISR_DATA", "/data")
 EKUR_ASSETS = "/opt/ekur/assets"
 DEFAULT_STANCE = -1258174396
@@ -35,6 +38,7 @@ core = loadout["Core"]
 armor = loadout.get("Armor") or {}
 coating = loadout.get("Coating") or ""
 visor = loadout.get("Visor") or ""
+disable_damage = bool(loadout.get("DisableDamage"))
 parts = {int(p["Region"]): int(p["Permutation"]) for p in (loadout.get("Parts") or [])}
 output = loadout.get("Output", "png")
 full = loadout.get("Size") == "full"
@@ -225,6 +229,7 @@ for x in keep:
 
 mp = sc.material_properties
 mp.selected_only = True
+mp.disable_damage = disable_damage
 if coating:
     mp.use_default_coating = False
     mp.coating_id = coating
@@ -269,7 +274,7 @@ phase("materials")
 if problems:
     sys.exit("Materials failed, not rendering a degraded Spartan: " + "; ".join(problems))
 
-stance_path = next(iter(sorted((Path(DATA) / "stances").glob(f"anim_{stance_id}_*.ekuranim"))), None)
+stance_path = rig.find_stance(DATA, stance_id)
 armature = next((o for o in bpy.data.objects if o.type == "ARMATURE"), None)
 if armature is None or stance_path is None:
     sys.exit(f"The armature or stance {stance_id} is missing from the data folder")
@@ -280,11 +285,19 @@ for x in keep:
             m.object = armature
 anim_data = importlib.import_module(MOD + ".src.model.importer.animation.anim_data")
 anim_import = importlib.import_module(MOD + ".src.model.importer.animation.importer")
-animation = anim_data.AnimationData()
-with open(stance_path, "rb") as fh:
-    animation.read(fh)
-animation.frames, animation.total_frames = animation.frames[:1], 1
-anim_import.import_animation(armature, animation, "stance")
+
+
+def load_clip(path, name):
+    return rig.read_clip(anim_data, anim_import, armature, path, name)
+
+
+if output == "glb":
+    neutral_path = rig.find_stance(DATA, DEFAULT_STANCE)
+    if neutral_path is None:
+        sys.exit(f"The default stance {DEFAULT_STANCE} is missing from the data folder")
+    rig.add_pose_clips(armature, (("neutral", neutral_path), ("stance", stance_path)), load_clip)
+else:
+    load_clip(stance_path, "stance")
 sc.frame_set(1)
 phase("pose")
 
@@ -295,7 +308,7 @@ def bake_folder(size):
     if not cache:
         return None
     renderer = hashlib.sha256(Path(sys.argv[sys.argv.index("--python") + 1]).read_bytes()).hexdigest()
-    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, visor, size], sort_keys=True)
+    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, visor, disable_damage, size], sort_keys=True)
     return Path(cache) / hashlib.sha256(ident.encode()).hexdigest()[:32]
 
 
@@ -382,22 +395,11 @@ def bake_to_plain_materials(size):
 
 
 if output == "glb":
-    for x in keep:
-        for m in x.modifiers:
-            if m.type == "ARMATURE":
-                m.show_viewport = True
+    rig.show_armature_modifiers(keep)
     bpy.context.view_layer.update()
-    graph = bpy.context.evaluated_depsgraph_get()
-    for x in keep:
-        posed = bpy.data.meshes.new_from_object(x.evaluated_get(graph))
-        for m in [m for m in x.modifiers if m.type == "ARMATURE"]:
-            x.modifiers.remove(m)
-        x.data = posed
     phase("mesh")
     bake_to_plain_materials(2048 if full else 1024)
-    for x in keep:
-        x.select_set(True)
-    bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", use_selection=True, export_apply=True, export_image_format="JPEG", export_jpeg_quality=85)
+    rig.export_glb(bpy.ops.export_scene.gltf, out, keep, armature)
     phase("export")
     sys.exit(0)
 

@@ -149,7 +149,7 @@ app.MapGet("/spartan-sets/{id}", (string id, RenderService service) =>
         ? Results.Ok(ToResponse(set))
         : Results.NotFound(new ErrorResponse("No such set. Sets do not survive a restart: POST the request again.")))
     .WithName("GetSpartanSet")
-    .WithSummary("The state of a set and the url of each of its six files")
+    .WithSummary("The state of a set and the url of each of its five files")
     .Produces<SetResponse>()
     .Produces<ErrorResponse>(StatusCodes.Status404NotFound);
 

@@ -21,6 +21,9 @@ public sealed record SpartanLoadout
     /// <summary>A visor title from the catalog's <c>visors</c>; null or empty is the core's default visor.</summary>
     public string? Visor { get; init; }
 
+    /// <summary>Leaves out the 7th or 4th material zone, the layer of grime and wear on armor, for a cleaner look.</summary>
+    public bool DisableDamage { get; init; }
+
     /// <summary><c>png</c> or <c>glb</c>.</summary>
     public string Output { get; init; } = "png";
 
@@ -50,6 +53,8 @@ public sealed record SpartanSetRequest
     public string? Coating { get; init; }
     /// <summary>A visor title from the catalog; null or empty is the core's default visor.</summary>
     public string? Visor { get; init; }
+    /// <summary>Leaves out the grime and wear zone, for a cleaner look.</summary>
+    public bool DisableDamage { get; init; }
 
     /// <summary>A StanceId from a player's action pose item (required by the API).</summary>
     public required int Stance { get; init; }
@@ -57,10 +62,10 @@ public sealed record SpartanSetRequest
     public string Size { get; init; } = "small";
 }
 
-/// <summary>One of the six files of a set: <see cref="Name"/> is stance-glb, stance-body, stance-head, neutral-glb, neutral-body or neutral-head.</summary>
+/// <summary>One of the five files of a set: <see cref="Name"/> is glb, stance-body, stance-head, neutral-body or neutral-head.</summary>
 public sealed record SpartanSetItem(string Name, string State, string Output, string Url);
 
-/// <summary>A set's state is the worst of its six items: failed, else done when all are, else running or queued.</summary>
+/// <summary>A set's state is the worst of its five items: failed, else done when all are, else running or queued.</summary>
 public sealed record SpartanSet(string Id, string State, IReadOnlyList<SpartanSetItem> Items)
 {
     public bool IsDone => State == "done";
