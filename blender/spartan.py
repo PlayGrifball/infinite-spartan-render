@@ -262,20 +262,15 @@ apply_materials(done)
 
 weapon_objs = []
 foregrip = None
+weapon_markers = {}
 if weapon:
     model = rig.weapon_model(WEAPONS, DATA, weapon)
     if model is None:
         sys.exit(f"No model for weapon '{weapon}' in the data folder")
     importer = importlib.import_module(MOD + ".src.model.importer.model_importer").ModelImporter()
-    # Imported with its rig at rest and its markers only to read where the foregrip is; the pose holds the meshes themselves
-    sc.model_properties.import_markers = True
-    meshes = [x for x in importer.start_import(str(model)) if x.type == "MESH"]
-    foregrip = rig.marker_position(importer.markers, rig.FOREGRIP_MARKER)
-    for x in importer.markers + ([importer.rig] if importer.rig else []):
-        bpy.data.objects.remove(x, do_unlink=True)
-    for x in meshes:
-        for m in [m for m in x.modifiers if m.type == "ARMATURE"]:
-            x.modifiers.remove(m)
+    meshes = [x for x in importer.start_import(str(model), bones=False) if x.type == "MESH"]
+    weapon_markers = rig.markers_of(importer.model)
+    foregrip = weapon_markers.get(rig.FOREGRIP_MARKER, (None,))[0]
     weapon_objs = rig.keep_default_build(meshes, lambda x: prop_id(x, "permutation_name"), lambda x: bpy.data.objects.remove(x, do_unlink=True), sc.collection.objects.link)
     rig.own_materials(weapon_objs, keep)
     rig.select_only(bpy.data.objects, weapon_objs)
@@ -316,11 +311,13 @@ if output == "glb":
 else:
     load_clip(stance_path, "stance")
 sc.frame_set(1)
+
+
 def both_hands(hand):
     # A two-handed pose: turn the gun about the grip so its foregrip points at the off hand's grip bone
     if foregrip is None:
         return hand
-    grip = hand.translation.copy()
+    grip = armature.matrix_world @ armature.pose.bones[rig.WEAPON_BONE].head
     off_grip = armature.matrix_world @ armature.pose.bones[rig.OFF_HAND_BONE].head
     turn = rig.off_hand_turn(tuple(grip), tuple(hand @ mathutils.Vector(foregrip)), tuple(off_grip))
     if turn is None:
@@ -329,8 +326,9 @@ def both_hands(hand):
 
 
 if weapon_objs:
+    offset, turn = rig.hand_offset(weapon_markers)
     rig.hold(weapon_objs, armature, mathutils.Matrix, bpy.context.view_layer.update,
-             mathutils.Quaternion(rig.PRIMARY_WEAPON_ROTATION).to_matrix().to_4x4(), both_hands)
+             mathutils.Matrix.LocRotScale(offset, mathutils.Quaternion(turn), (1, 1, 1)), both_hands)
     if output == "glb":
         rig.add_visibility_clips(weapon_objs, {"neutral": False, "stance": True}, bpy.data.actions.new)
     keep += weapon_objs

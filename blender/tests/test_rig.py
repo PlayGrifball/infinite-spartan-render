@@ -152,10 +152,30 @@ def test_a_weapon_is_held_on_the_right_hand_grip():
     assert rig.WEAPON_BONE == "b_r_grip"
 
 
-def test_the_weapon_marker_is_a_unit_quaternion_in_blender_order():
-    w, x, y, z = rig.PRIMARY_WEAPON_ROTATION
+def test_the_spartans_weapon_marker_is_a_unit_quaternion_in_halo_order():
+    x, y, z, w = rig.SPARTAN_WEAPON_MARKER[1]
     assert abs(w * w + x * x + y * y + z * z - 1) < 0.01
-    assert (w, z) == (0.638, 0.769), "Halo stores x, y, z, w; Blender takes w first"
+
+
+def test_a_weapon_whose_hand_marker_matches_the_spartans_sits_on_the_grip():
+    position, rotation = rig.SPARTAN_WEAPON_MARKER
+    same = {"right_hand_spartan": (tuple(v * rig.UNIT for v in position), rotation)}
+
+    t, q = rig.hand_offset(same)
+
+    assert close(t, (0, 0, 0)) and close(q, (1, 0, 0, 0))
+
+
+def test_the_hand_offset_turns_by_the_spartans_marker_and_back_by_the_weapons(monkeypatch):
+    quarter_z = (0, 0, 2 ** -0.5, 2 ** -0.5)
+    monkeypatch.setattr(rig, "SPARTAN_WEAPON_MARKER", ((0, 0, 0), quarter_z))
+    weapon = {"right_hand": ((1.0, 0, 0), (0, 0, 0, 1)), "other": ((9, 9, 9), (0, 0, 0, 1))}
+
+    t, q = rig.hand_offset(weapon)
+
+    assert close(q, (2 ** -0.5, 0, 0, 2 ** -0.5))
+    assert close(t, (0, -1.0, 0)), "the weapon's hand marker, turned a quarter, is brought back onto the grip"
+    assert close(rig.hand_offset({})[1], (2 ** -0.5, 0, 0, 2 ** -0.5)), "no hand marker: the Spartan's marker alone"
 
 
 class FakeMaterials:
@@ -343,9 +363,15 @@ def test_hold_lets_the_caller_adjust_the_hand_before_parenting():
     assert gun.matrix_world.name == "turned([loc(arm*grip),rot(arm*grip),(1, 1, 1)]*marker)*gun"
 
 
-def test_a_markers_position_is_found_by_name_ignoring_blenders_suffix():
-    marker = SimpleNamespace(name="left_hand_spartan.001", matrix_world=SimpleNamespace(translation=(0.31, 0.03, 0.05)))
-    other = SimpleNamespace(name="right_hand", matrix_world=SimpleNamespace(translation=(0, 0, 0)))
+def test_a_models_markers_are_read_in_metres_from_their_first_instance():
+    def instance(p, r):
+        return SimpleNamespace(position=SimpleNamespace(vector=p), rotation=SimpleNamespace(vector=r))
+    model = SimpleNamespace(markers=[
+        SimpleNamespace(name="left_hand_spartan", instances=[instance((0.1, 0, 0), (0, 0, 0, 1)), instance((5, 5, 5), (0, 0, 0, 1))]),
+        SimpleNamespace(name="empty", instances=[]),
+    ])
 
-    assert rig.marker_position([other, marker], rig.FOREGRIP_MARKER) == (0.31, 0.03, 0.05)
-    assert rig.marker_position([other], rig.FOREGRIP_MARKER) is None
+    markers = rig.markers_of(model)
+
+    assert list(markers) == ["left_hand_spartan"]
+    assert close(markers["left_hand_spartan"][0], (0.1 * rig.UNIT, 0, 0))

@@ -67,9 +67,13 @@ def has_light(rgba):
 
 # A weapon's model origin is its grip; the game's rig moves this bone to where the right hand holds it.
 WEAPON_BONE = "b_r_grip"
-# The rotation of the Spartan model's primary_weapon marker on that bone (spartan_armor), w first: how a held weapon sits in the
-# hand. Without it the gun points along the bone instead of across the body, and the off hand misses its foregrip.
-PRIMARY_WEAPON_ROTATION = (0.638, -0.02, 0.029, 0.769)
+# A held weapon's right_hand_spartan marker sits on the Spartan model's primary_weapon marker, which is on that bone
+# (spartan_armor): position in Halo units, rotation x, y, z, w as Halo stores it.
+SPARTAN_WEAPON_MARKER = ((-0.004, 0.004, -0.001), (-0.02, 0.029, 0.769, 0.638))
+# The weapon markers that meet it, best first.
+WEAPON_HAND_MARKERS = ("right_hand_spartan", "right_hand")
+# Metres per Halo unit, as Ekur imports models.
+UNIT = 3.048
 
 
 def add_visibility_clips(objects, shown, new_action):
@@ -188,10 +192,43 @@ OFF_HAND_BONE = "b_l_grip"
 FOREGRIP_MARKER = "left_hand_spartan"
 
 
-def marker_position(markers, name):
-    # Where a weapon's marker sits in the weapon's own space (its markers imported with the rig at rest), or None.
-    found = next((m for m in markers if m.name.split(".")[0] == name), None)
-    return tuple(found.matrix_world.translation) if found else None
+def markers_of(model):
+    # A model's markers by name: (position in metres, rotation x, y, z, w), from each one's first instance.
+    out = {}
+    for marker in model.markers:
+        if marker.instances:
+            first = marker.instances[0]
+            out[str(marker.name)] = (tuple(v * UNIT for v in first.position.vector), tuple(first.rotation.vector))
+    return out
+
+
+def _qmul(a, b):
+    aw, ax, ay, az = a
+    bw, bx, by, bz = b
+    return (aw * bw - ax * bx - ay * by - az * bz, aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx, aw * bz + ax * by - ay * bx + az * bw)
+
+
+def _rotate(q, v):
+    w, x, y, z = _qmul(_qmul(q, (0.0, *v)), (q[0], -q[1], -q[2], -q[3]))
+    return (x, y, z)
+
+
+def _wxyz(xyzw):
+    x, y, z, w = xyzw
+    return (w, x, y, z)
+
+
+def hand_offset(weapon_markers):
+    # Where the weapon sits relative to the grip bone: the Spartan's weapon marker, less the weapon's own hand marker.
+    # Returns (translation, rotation w, x, y, z).
+    position, rotation = SPARTAN_WEAPON_MARKER
+    spartan_t, spartan_q = tuple(v * UNIT for v in position), _wxyz(rotation)
+    hand = next((weapon_markers[n] for n in WEAPON_HAND_MARKERS if n in weapon_markers), ((0, 0, 0), (0, 0, 0, 1)))
+    hand_q = _wxyz(hand[1])
+    q = _qmul(spartan_q, (hand_q[0], -hand_q[1], -hand_q[2], -hand_q[3]))
+    moved = _rotate(q, hand[0])
+    return tuple(a - b for a, b in zip(spartan_t, moved)), q
 
 
 # How far the pose's off-hand grip may be from a gun's foregrip and still be holding it; further, the hold is one-handed.
