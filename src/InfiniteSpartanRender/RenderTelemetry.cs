@@ -11,7 +11,7 @@ public static class RenderTelemetry
     public static readonly ActivitySource Source = new(Name);
     public static readonly Meter Meter = new(Name);
 
-    // outcome: done, failed, cached (answered from the cache), rejected (queue full). caller: the name of the API key the request carried, or none.
+    // outcome: done, failed, cached (answered from the cache), joined (the same loadout was already queued or running), rejected (queue full). caller: the name of the API key the request carried, or none.
     public static readonly Counter<long> Jobs = Meter.CreateCounter<long>("spartan_render.jobs", description: "Render requests by outcome");
 
     // phase: import, materials, pose, mesh, bake, export, scene, render (a bake is recorded once per mesh and texture).

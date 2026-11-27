@@ -26,7 +26,7 @@ public sealed class CallerKeys(IOptions<RenderOptions> options)
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(presented));
         string? found = null;
         foreach (var key in options.Value.ApiKeys)
-            if (key.Key.Length > 0 && CryptographicOperations.FixedTimeEquals(hash, SHA256.HashData(Encoding.UTF8.GetBytes(key.Key))))
+            if (key.Key.Length > 0 && !string.IsNullOrWhiteSpace(key.Name) && CryptographicOperations.FixedTimeEquals(hash, SHA256.HashData(Encoding.UTF8.GetBytes(key.Key))))
                 found ??= key.Name;
         return found;
     }

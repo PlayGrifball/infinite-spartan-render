@@ -61,7 +61,11 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         var queued = new JobStatus(id, JobState.Queued, null, DateTimeOffset.UtcNow);
         var caller = Activity.Current?.GetTagItem(CallerKeys.SpanTag) as string;
         var current = _jobs.AddOrUpdate(id, queued, (_, existing) => existing.State is JobState.Queued or JobState.Running ? existing : queued);
-        if (!ReferenceEquals(current, queued)) return current;
+        if (!ReferenceEquals(current, queued))
+        {
+            RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", "joined"), Caller(caller));
+            return current;
+        }
         if (_queue.Writer.TryWrite(new QueuedJob(id, loadout, Activity.Current?.Context ?? default, caller))) return current;
         _jobs.TryRemove(id, out _);
         RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", "rejected"), Caller(caller));

@@ -14,10 +14,17 @@ public class CallerTests
 {
     private sealed class QuickRunner : IBlenderRunner
     {
-        public Task RunAsync(Loadout loadout, string outputPath, CancellationToken cancellationToken) =>
-            File.WriteAllTextAsync(outputPath, "x", cancellationToken);
+        public readonly TaskCompletionSource Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Hold;
+
+        public async Task RunAsync(Loadout loadout, string outputPath, CancellationToken cancellationToken)
+        {
+            if (Hold) await Gate.Task.WaitAsync(cancellationToken);
+            await File.WriteAllTextAsync(outputPath, "x", cancellationToken);
+        }
     }
 
+    private readonly QuickRunner _runner = new();
     private string _cache = "";
     private WebApplicationFactory<Program> _factory = null!;
     private HttpClient _client = null!;
@@ -34,7 +41,9 @@ public class CallerTests
             b.UseSetting("Render:ApiKeys:0:Key", "test-secret");
             b.UseSetting("Render:ApiKeys:1:Name", "grif-prod");
             b.UseSetting("Render:ApiKeys:1:Key", "prod-secret");
-            b.ConfigureServices(s => s.Replace(ServiceDescriptor.Singleton<IBlenderRunner>(new QuickRunner())));
+            b.UseSetting("Render:ApiKeys:2:Name", "");
+            b.UseSetting("Render:ApiKeys:2:Key", "nameless-secret");
+            b.ConfigureServices(s => s.Replace(ServiceDescriptor.Singleton<IBlenderRunner>(_runner)));
         });
         _client = _factory.CreateClient();
     }
@@ -86,6 +95,36 @@ public class CallerTests
     public async Task AWrongKey_Is401()
     {
         Assert.That((await Post("nope")).StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+    }
+
+    [Test]
+    public async Task AKeyWithoutAName_NeverAuthenticates_SoNoCallerIsLeftUnattributed()
+    {
+        Assert.That((await Post("nameless-secret")).StatusCode, Is.EqualTo(HttpStatusCode.Unauthorized));
+    }
+
+    [Test]
+    public async Task ASecondCallerJoiningARunningJob_IsCountedAsJoined_UnderItsOwnName()
+    {
+        _runner.Hold = true;
+        var counted = new List<(string Outcome, string Caller)>();
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (i, l) => { if (i.Meter.Name == RenderTelemetry.Name && i.Name == "spartan_render.jobs") l.EnableMeasurementEvents(i); };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            var t = tags.ToArray();
+            lock (counted) counted.Add((t.Single(x => x.Key == "outcome").Value!.ToString()!, t.Single(x => x.Key == "caller").Value!.ToString()!));
+        });
+        listener.Start();
+
+        var first = await Post("test-secret");
+        var second = await Post("prod-secret");
+        _runner.Gate.SetResult();
+        await WaitDone(first);
+
+        var firstId = (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+        Assert.That((await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString(), Is.EqualTo(firstId));
+        lock (counted) Assert.That(counted, Does.Contain(("joined", "grif-prod")));
     }
 
     [Test]
