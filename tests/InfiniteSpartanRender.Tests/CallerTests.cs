@@ -127,8 +127,8 @@ public class CallerTests
         using (Assert.EnterMultipleScope())
         {
             Assert.That(render.GetTagItem(CallerKeys.SpanTag), Is.EqualTo("grif-test"));
-                    Assert.That(request.GetTagItem(CallerKeys.SpanTag), Is.EqualTo("grif-test"));
-                    Assert.That(render.ParentSpanId, Is.EqualTo(request.SpanId));
+            Assert.That(request.GetTagItem(CallerKeys.SpanTag), Is.EqualTo("grif-test"));
+            Assert.That(render.ParentSpanId, Is.EqualTo(request.SpanId));
         }
     }
 
