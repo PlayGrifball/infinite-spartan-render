@@ -49,3 +49,12 @@ def export_glb(gltf_export, path, objects, armature):
         export_image_format="JPEG",
         export_jpeg_quality=85,
     )
+
+
+def texture_size(full):
+    # 24 parts x 4 maps at 1024 is ~500 MB on the GPU, which kills a phone's tab.
+    return 2048 if full else 512
+
+
+def has_light(rgba):
+    return any(any(rgba[channel::4]) for channel in range(3))

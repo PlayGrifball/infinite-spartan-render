@@ -386,8 +386,13 @@ def bake_to_plain_materials(size):
         nmap.uv_map = obj.data.uv_layers[0].name
         nt.links.new(tex["normal"].outputs["Color"], nmap.inputs["Color"])
         nt.links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
-        nt.links.new(tex["emit"].outputs["Color"], bsdf.inputs["Emission Color"])
-        bsdf.inputs["Emission Strength"].default_value = 1.0
+        pixels = [0.0] * len(images["emit"].pixels)
+        images["emit"].pixels.foreach_get(pixels)
+        if rig.has_light(pixels):
+            nt.links.new(tex["emit"].outputs["Color"], bsdf.inputs["Emission Color"])
+            bsdf.inputs["Emission Strength"].default_value = 1.0
+        else:
+            nt.nodes.remove(tex["emit"])
         obj.data.materials.clear()
         obj.data.materials.append(plain)
         obj.data.polygons.foreach_set("material_index", [0] * len(obj.data.polygons))
@@ -398,7 +403,7 @@ if output == "glb":
     rig.show_armature_modifiers(keep)
     bpy.context.view_layer.update()
     phase("mesh")
-    bake_to_plain_materials(2048 if full else 1024)
+    bake_to_plain_materials(rig.texture_size(full))
     rig.export_glb(bpy.ops.export_scene.gltf, out, keep, armature)
     phase("export")
     sys.exit(0)
