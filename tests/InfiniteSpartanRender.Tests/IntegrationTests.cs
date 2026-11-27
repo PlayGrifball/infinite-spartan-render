@@ -167,10 +167,15 @@ public class IntegrationTests
         Assert.That(System.Text.Encoding.ASCII.GetString(bytes, 0, 4), Is.EqualTo("glTF"));
         var jsonLength = BitConverter.ToInt32(bytes, 12);
         var json = System.Text.Json.JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(bytes, 20, jsonLength)).RootElement;
-        Assert.That(json.GetProperty("skins").GetArrayLength(), Is.GreaterThan(0), "the game rig is kept");
-        Assert.That(json.GetProperty("animations").EnumerateArray().Select(a => a.GetProperty("name").GetString()), Is.EquivalentTo(new[] { "neutral", "stance" }));
-        Assert.That(bytes.Length, Is.GreaterThan(100_000));
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(json.GetProperty("skins").GetArrayLength(), Is.GreaterThan(0), "the game rig is kept");
+            Assert.That(json.GetProperty("animations").EnumerateArray().Select(a => a.GetProperty("name").GetString()), Is.EquivalentTo(Clips));
+            Assert.That(bytes.Length, Is.GreaterThan(100_000));
+        }
     }
+
+    private static readonly string[] Clips = ["neutral", "stance"];
 
     [Test]
     public async Task TheSameArmorInAnotherStance_ReusesTheBakedTextures()
