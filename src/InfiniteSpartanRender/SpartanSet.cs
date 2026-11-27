@@ -16,6 +16,9 @@ public sealed record SpartanSetRequest
     public bool DisableDamage { get; init; }
     // A StanceId from a player's action pose item.
     public int? Stance { get; init; }
+    // The weapon the stance holds (and its coating): in the stance renders and the GLB's stance clip, never in the neutral pose.
+    public string? Weapon { get; init; }
+    public string? WeaponCoating { get; init; }
     public string Size { get; init; } = "small";
 
     // The five renders: body and head by pose, and the one GLB. A chosen stance equal to the neutral one is the neutral one.
@@ -26,18 +29,18 @@ public sealed record SpartanSetRequest
         var items = new List<(string, Loadout)>();
         foreach (var (pose, stance) in new[] { ("stance", chosen), ("neutral", (int?)null) })
         {
-            var basis = shared with { Stance = stance };
+            var basis = pose == "stance" ? shared with { Stance = stance, Weapon = Weapon, WeaponCoating = WeaponCoating } : shared with { Stance = stance };
             items.Add(($"{pose}-body", basis with { Output = "png", Framing = "body" }));
             items.Add(($"{pose}-head", basis with { Output = "png", Framing = "head" }));
         }
-        items.Add(("glb", shared with { Stance = chosen, Output = "glb" }));
+        items.Add(("glb", shared with { Stance = chosen, Weapon = Weapon, WeaponCoating = WeaponCoating, Output = "glb" }));
         return items;
     }
 
-    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null)
+    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null, IReadOnlyCollection<string>? weapons = null)
     {
         if (Stance is null) return "stance is required";
-        return Items()[0].Loadout.Validate(cores, visors);
+        return Items()[0].Loadout.Validate(cores, visors, weapons);
     }
 
     public string Id(string renderer = "") => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join(',', Items().Select(i => i.Loadout.Id(renderer))))))[..32].ToLowerInvariant();

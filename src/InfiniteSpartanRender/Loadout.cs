@@ -28,16 +28,23 @@ public sealed record Loadout
     public string Framing { get; init; } = "body";
     // A StanceId from a player's action pose item; empty means the default stance.
     public int? Stance { get; init; }
+    // A weapon name from the catalog, held in the right hand; empty means empty hands.
+    public string? Weapon { get; init; }
+    // A coating id from the weapon's stylelists; empty means the weapon's default coating.
+    public string? WeaponCoating { get; init; }
 
     private static readonly Regex CoatingId = new(@"^-?\d{1,12}$", RegexOptions.Compiled);
 
-    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null)
+    public string? Validate(IReadOnlyCollection<string> cores, IReadOnlyCollection<string>? visors = null, IReadOnlyCollection<string>? weapons = null)
     {
         if (string.IsNullOrWhiteSpace(Core) || Core.Length > 64) return "core is required (at most 64 characters)";
         if (!cores.Contains(Core)) return $"core must be one of: {string.Join(", ", cores)}";
         if (PiecesProblem() is { } pieces) return pieces;
         if (!string.IsNullOrEmpty(Coating) && !CoatingId.IsMatch(Coating)) return "coating must be a numeric coating id";
         if (!string.IsNullOrEmpty(Visor) && visors is not null && !visors.Contains(Visor)) return "visor must be a title from the catalog";
+        if (!string.IsNullOrEmpty(Weapon) && (Weapon.Length > 64 || (weapons is not null && !weapons.Contains(Weapon)))) return "weapon must be a name from the catalog";
+        if (!string.IsNullOrEmpty(WeaponCoating) && !CoatingId.IsMatch(WeaponCoating)) return "weapon coating must be a numeric coating id";
+        if (!string.IsNullOrEmpty(WeaponCoating) && string.IsNullOrEmpty(Weapon)) return "weapon coating needs a weapon";
         if (Output is not ("png" or "glb")) return "output must be png or glb";
         if (Size is not ("small" or "full")) return "size must be small or full";
         if (Framing is not ("body" or "head")) return "framing must be body or head";
@@ -77,6 +84,8 @@ public sealed record Loadout
             size = Size,
             framing = Framing,
             stance = Stance,
+            weapon = string.IsNullOrEmpty(Weapon) ? "" : Weapon,
+            weaponCoating = string.IsNullOrEmpty(WeaponCoating) ? "" : WeaponCoating,
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..32].ToLowerInvariant();
     }

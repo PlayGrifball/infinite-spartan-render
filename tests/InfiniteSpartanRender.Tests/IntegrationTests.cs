@@ -26,6 +26,7 @@ public class IntegrationTests
         _runner = new BlenderRunner(Options.Create(new RenderOptions
         {
             ScriptPath = Path.Combine(dir!.FullName, "blender", "spartan.py"),
+            WeaponsPath = Path.Combine(dir!.FullName, "blender", "weapons.json"),
             WorkDirectory = Path.Combine(_work, "render"),
             CacheDirectory = Path.Combine(_work, "cache"),
             TimeoutSeconds = 1800,
@@ -83,7 +84,7 @@ public class IntegrationTests
         WriteTimings();
         // Three tests render Mark VII: the first imports it (minutes), the others open the saved import.
         double[] imports;
-        lock (_phases) imports = _phases.Where(p => p.Phase == "import" && !p.Test.Contains("Yoroi") && !p.Test.Contains("WithoutABodyType") && !p.Test.Contains("Warm") && !p.Test.Contains("Visor")).Select(p => p.Seconds).ToArray();
+        lock (_phases) imports = _phases.Where(p => p.Phase == "import" && !p.Test.Contains("Yoroi") && !p.Test.Contains("WithoutABodyType") && !p.Test.Contains("Warm") && !p.Test.Contains("Visor") && !p.Test.Contains("Weapon")).Select(p => p.Seconds).ToArray();
         if (imports.Length == 3) Assert.That(imports.Count(s => s < 60), Is.GreaterThanOrEqualTo(2), "a core's import is reused: " + string.Join(", ", imports));
         if (_work.Length > 0 && Directory.Exists(_work)) Directory.Delete(_work, recursive: true);
     }
@@ -153,6 +154,20 @@ public class IntegrationTests
 
         Keep(visored);
         Assert.That(await File.ReadAllBytesAsync(visored), Is.Not.EqualTo(await File.ReadAllBytesAsync(plain)), "the visor is in the picture");
+    }
+
+    [Test]
+    public async Task AWeapon_IsHeldInTheStanceRender()
+    {
+        var empty = Path.Combine(_work, "weapon-none.png");
+        var held = Path.Combine(_work, "weapon-commando.png");
+        var stance = new Loadout { Core = "Mark VII", Output = "png", Stance = 1756613951 };
+
+        await _runner.RunAsync(stance, empty, CancellationToken.None);
+        await _runner.RunAsync(stance with { Weapon = "VK78 Commando Rifle", WeaponCoating = "-976095822" }, held, CancellationToken.None);
+
+        Keep(held);
+        Assert.That(await File.ReadAllBytesAsync(held), Is.Not.EqualTo(await File.ReadAllBytesAsync(empty)), "the rifle is in the picture");
     }
 
     [Test]

@@ -85,6 +85,7 @@ def test_export_selects_everything_and_writes_a_rigged_glb_with_nla_clips():
     assert options["export_skins"] is True
     assert options["export_animations"] is True
     assert options["export_animation_mode"] == "NLA_TRACKS"
+    assert options["export_optimize_animation_keep_anim_object"] is True, "a weapon's one-key visibility clips are constant, and dropped otherwise"
 
 
 def test_find_stance_returns_the_first_matching_file_and_none_when_there_is_none(tmp_path):
@@ -118,3 +119,34 @@ def test_an_emission_map_with_no_light_in_it_is_skipped():
     glowing = [0.0, 0.0, 0.0, 1.0] * 3 + [0.0, 0.2, 0.0, 1.0]
     assert not rig.has_light(black)
     assert rig.has_light(glowing)
+
+
+def fake_object(name, scale=(0.3, 0.3, 0.3)):
+    tracks = []
+
+    def new_track():
+        track = SimpleNamespace(name=None, strips=Recorder())
+        tracks.append(track)
+        return track
+
+    keys = []
+    animation = SimpleNamespace(action=None, nla_tracks=SimpleNamespace(new=new_track))
+    obj = SimpleNamespace(name=name, scale=scale, animation_data_create=lambda: animation)
+    obj.keyframe_insert = lambda data_path, frame: keys.append((animation.action, data_path, frame, tuple(obj.scale)))
+    return obj, animation, tracks, keys
+
+
+def test_a_weapon_is_scaled_to_nothing_in_the_clips_it_is_hidden_in_and_keeps_its_scale():
+    gun, animation, tracks, keys = fake_object("gun")
+
+    rig.add_visibility_clips([gun], {"neutral": False, "stance": True}, lambda name: f"action-{name}")
+
+    assert [t.name for t in tracks] == ["neutral", "stance"]
+    assert [t.strips.calls for t in tracks] == [[("new", ("neutral", 1, "action-gun-neutral"), {})], [("new", ("stance", 1, "action-gun-stance"), {})]]
+    assert keys == [("action-gun-neutral", "scale", 1, (0, 0, 0)), ("action-gun-stance", "scale", 1, (0.3, 0.3, 0.3))]
+    assert animation.action is None
+    assert tuple(gun.scale) == (0.3, 0.3, 0.3)
+
+
+def test_a_weapon_is_held_on_the_right_hand_grip():
+    assert rig.WEAPON_BONE == "b_r_grip"

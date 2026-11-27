@@ -28,11 +28,13 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
 
     public string CachedPath(string id, string output) => PathFor(id, output);
 
-    // The Blender script is the renderer: any change to it changes every id, so old files are never served.
+    // The Blender scripts and the weapon list are the renderer: any change to them changes every id, so old files are never served.
     private readonly Lazy<string> _renderer = new(() =>
     {
         var script = options.Value.ScriptPath;
-        return File.Exists(script) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(script)))[..12] : "";
+        if (!File.Exists(script)) return "";
+        var files = new[] { script, Path.Combine(Path.GetDirectoryName(script) ?? "", "rig.py"), options.Value.WeaponsPath }.Where(File.Exists);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(files.SelectMany(File.ReadAllBytes).ToArray()))[..12];
     });
 
     public Catalog Catalog() => catalog.Get(_renderer.Value);

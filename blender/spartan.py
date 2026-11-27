@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(sys.argv[sys.argv.index("--python") + 1]).resolve().
 import rig  # noqa: E402
 
 DATA = os.environ.get("ISR_DATA", "/data")
+WEAPONS = Path(os.environ.get("ISR_WEAPONS") or Path(sys.argv[sys.argv.index("--python") + 1]).resolve().parent / "weapons.json")
 EKUR_ASSETS = "/opt/ekur/assets"
 DEFAULT_STANCE = -1258174396
 MOD = "bl_ext.user_default.ekur"
@@ -46,6 +47,8 @@ stance_id = loadout.get("Stance")
 if stance_id is None:
     stance_id = DEFAULT_STANCE
 framing = loadout.get("Framing", "body")
+weapon = loadout.get("Weapon") or ""
+weapon_coating = loadout.get("WeaponCoating") or ""
 
 addon_utils.enable(MOD, default_set=True)
 bpy.context.preferences.addons[MOD].preferences.data_folder = DATA
@@ -246,34 +249,67 @@ if visor:
     visor_shader.read_json_file = lambda path, T: read_ekur_json(
         Path(f"{EKUR_ASSETS}/all_visors.json") if Path(path).name == "all_visors.json" else path, T)
 
-mo =importlib.import_module(MOD + ".src.operators.material_operator")
+mo = importlib.import_module(MOD + ".src.operators.material_operator")
 ju = importlib.import_module(MOD + ".src.utils")
 jd = importlib.import_module(MOD + ".src.json_definitions")
 done = set()
 missing = set()
 problems = []
-for slot in mo.get_materials():
-    if not slot.material or not slot.material.node_tree:
-        continue
-    n = slot.name.split(".")[0]
-    if n in done or n in missing:
-        continue
-    p = Path(f"{DATA}/materials/{n}.json")
-    if not p.exists():
-        missing.add(n)
-        if re.fullmatch(r"-?\d+", n):
-            problems.append(f"material {n}: no JSON in the data folder")
-        continue
-    mo.remove_nodes(slot.material.node_tree)
-    m = ju.read_json_file(p, jd.CommonMaterial)
-    done.add(n)
-    if m is None:
-        problems.append(f"material {n}: unreadable JSON")
-        continue
-    try:
-        mo.run_material(m, slot.material.node_tree)
-    except Exception as e:
-        problems.append(f"material {n}: {e!r}"[:200])
+
+
+def apply_materials():
+    # Ekur's material import of the selected objects, one material at a time: its own operator stops at the first missing JSON.
+    for slot in mo.get_materials():
+        if not slot.material or not slot.material.node_tree:
+            continue
+        n = slot.name.split(".")[0]
+        if n in done or n in missing:
+            continue
+        p = Path(f"{DATA}/materials/{n}.json")
+        if not p.exists():
+            missing.add(n)
+            if re.fullmatch(r"-?\d+", n):
+                problems.append(f"material {n}: no JSON in the data folder")
+            continue
+        mo.remove_nodes(slot.material.node_tree)
+        m = ju.read_json_file(p, jd.CommonMaterial)
+        done.add(n)
+        if m is None:
+            problems.append(f"material {n}: unreadable JSON")
+            continue
+        try:
+            mo.run_material(m, slot.material.node_tree)
+        except Exception as e:
+            problems.append(f"material {n}: {e!r}"[:200])
+
+
+apply_materials()
+
+# A weapon model has a permutation per region for each build; the standard build is every region's "Default" permutation.
+DEFAULT_PERMUTATION = 1120495519
+weapon_objs = []
+if weapon:
+    entry = next((w for w in json.loads(WEAPONS.read_text()) if w["name"] == weapon), None)
+    model = Path(f"{DATA}/models/{entry['model']}.ekur") if entry else None
+    if model is None or not model.exists():
+        sys.exit(f"No model for weapon '{weapon}' in the data folder")
+    importer = importlib.import_module(MOD + ".src.model.importer.model_importer").ModelImporter()
+    meshes = [x for x in importer.start_import(str(model), bones=False) if x.type == "MESH"]
+    weapon_objs = [x for x in meshes if prop_id(x, "permutation_name") == DEFAULT_PERMUTATION] or meshes
+    for x in meshes:
+        if x not in weapon_objs:
+            bpy.data.objects.remove(x, do_unlink=True)
+        elif not x.users_collection:
+            sc.collection.objects.link(x)
+    for x in bpy.data.objects:
+        x.select_set(False)
+    for x in weapon_objs:
+        x.select_set(True)
+    mp.use_default_coating = not weapon_coating
+    mp.coating_id = weapon_coating
+    mp.override_visor = False
+    apply_materials()
+    print("WEAPON", weapon, entry["model"], len(weapon_objs), "meshes", flush=True)
 print("MATS", len(done), "missing", sorted(missing))
 phase("materials")
 if problems:
@@ -304,6 +340,20 @@ if output == "glb":
 else:
     load_clip(stance_path, "stance")
 sc.frame_set(1)
+if weapon_objs:
+    # The model's origin is its grip: hold it on the right hand's grip bone, so it follows whatever pose plays.
+    grip = armature.pose.bones[rig.WEAPON_BONE]
+    bpy.context.view_layer.update()
+    location, rotation, _ = (armature.matrix_world @ grip.matrix).decompose()
+    hand = mathutils.Matrix.LocRotScale(location, rotation, mathutils.Vector((1, 1, 1)))
+    for x in weapon_objs:
+        placed = hand @ x.matrix_world
+        x.parent, x.parent_type, x.parent_bone = armature, "BONE", rig.WEAPON_BONE
+        bpy.context.view_layer.update()
+        x.matrix_world = placed
+    if output == "glb":
+        rig.add_visibility_clips(weapon_objs, {"neutral": False, "stance": True}, bpy.data.actions.new)
+    keep += weapon_objs
 phase("pose")
 
 
@@ -313,7 +363,7 @@ def bake_folder(size):
     if not cache:
         return None
     renderer = hashlib.sha256(Path(sys.argv[sys.argv.index("--python") + 1]).read_bytes()).hexdigest()
-    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, visor, disable_damage, size], sort_keys=True)
+    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, visor, disable_damage, weapon, weapon_coating, size], sort_keys=True)
     return Path(cache) / hashlib.sha256(ident.encode()).hexdigest()[:32]
 
 

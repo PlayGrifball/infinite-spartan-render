@@ -10,8 +10,14 @@ public sealed record CatalogRegion(string Kind, string Key, int Region, IReadOnl
 
 public sealed record CatalogCore(string Name, IReadOnlyList<CatalogRegion> Regions);
 
-// What a loadout may name: cores with their pieces, coating ids and visor titles. PendingCores are still importing.
-public sealed record Catalog(IReadOnlyList<CatalogCore> Cores, IReadOnlyList<string> Coatings, IReadOnlyList<string> Visors, IReadOnlyList<string> PendingCores);
+// A weapon a stance can hold: Tags are the action pose weaponTagIds that mean it, CoreType the Halo weapon core whose equipped
+// theme gives its coating (null for weapons with no customization), Coatings the coating ids of its stylelists.
+public sealed record CatalogWeapon(string Name, string? CoreType, IReadOnlyList<int> Tags, IReadOnlyList<string> Coatings);
+
+// What a loadout may name: cores with their pieces, coating ids, visor titles and weapons. PendingCores are still importing.
+public sealed record Catalog(IReadOnlyList<CatalogCore> Cores, IReadOnlyList<string> Coatings, IReadOnlyList<string> Visors, IReadOnlyList<string> PendingCores, IReadOnlyList<CatalogWeapon> Weapons);
+
+internal sealed record WeaponEntry(string Name, string Model, string? CoreType, int[] Tags, int[] Stylelists);
 
 public sealed class CatalogService(IOptions<RenderOptions> options)
 {
@@ -24,7 +30,7 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
     public string PathFor(string core, string renderer)
         => Path.Combine(options.Value.CacheDirectory, "catalog", $"{renderer}-{string.Concat(core.Select(c => char.IsLetterOrDigit(c) ? c : '-'))}.json");
 
-    // Built again only when a file it reads (a core's catalog, a stylelist, the visor list) was added, removed or changed.
+    // Built again only when a file it reads (a core's catalog, a stylelist, the visor list, the weapon list or a weapon model) was added, removed or changed.
     public Catalog Get(string renderer)
     {
         var o = options.Value;
@@ -44,6 +50,8 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
         var folder = Path.Combine(o.DataDirectory, "stylelists");
         if (Directory.Exists(folder)) files.AddRange(Directory.EnumerateFiles(folder, "*.json").Order(StringComparer.Ordinal));
         files.Add(Path.Combine(o.EkurAssets, "all_visors.json"));
+        files.Add(o.WeaponsPath);
+        files.AddRange(ReadWeapons(o.WeaponsPath).Select(w => ModelPath(o.DataDirectory, w.Model)));
         return string.Join('\n', files.Select(f => new FileInfo(f) is { Exists: true } i ? $"{f}|{i.Length}|{i.LastWriteTimeUtc.Ticks}" : f + "|missing"));
     }
 
@@ -56,7 +64,7 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
             var core = ReadCore(PathFor(name, renderer), name);
             if (core is null) pending.Add(name); else cores.Add(core);
         }
-        return new Catalog(cores, Coatings(o.DataDirectory), Visors(o.EkurAssets), pending);
+        return new Catalog(cores, Coatings(o.DataDirectory), Visors(o.EkurAssets), pending, Weapons(o));
     }
 
     private static CatalogCore? ReadCore(string file, string name)
@@ -65,14 +73,34 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
         catch (Exception e) when (e is JsonException or IOException) { return null; }
     }
 
+    private static string ModelPath(string dataDirectory, string model) => Path.Combine(dataDirectory, "models", model + ".ekur");
+
+    internal static List<WeaponEntry> ReadWeapons(string file)
+    {
+        try { return File.Exists(file) ? JsonSerializer.Deserialize<List<WeaponEntry>>(File.ReadAllText(file), Web) ?? [] : []; }
+        catch (Exception e) when (e is JsonException or IOException) { return []; }
+    }
+
+    // The weapons whose model is in the data folder, each with the coatings of its own stylelists.
+    private static List<CatalogWeapon> Weapons(RenderOptions o)
+        => ReadWeapons(o.WeaponsPath)
+            .Where(w => File.Exists(ModelPath(o.DataDirectory, w.Model)))
+            .Select(w => new CatalogWeapon(w.Name, w.CoreType, w.Tags ?? [], StyleIds((w.Stylelists ?? []).Select(id => Path.Combine(o.DataDirectory, "stylelists", $"{id}.json")))))
+            .ToList();
+
     // The style ids Ekur accepts as a coating: the keys of "styles" in every stylelist (a file that is not readable JSON adds none).
     private static List<string> Coatings(string dataDirectory)
     {
-        var ids = new SortedSet<string>(StringComparer.Ordinal);
         var folder = Path.Combine(dataDirectory, "stylelists");
-        if (!Directory.Exists(folder)) return [];
-        foreach (var file in Directory.EnumerateFiles(folder, "*.json"))
+        return Directory.Exists(folder) ? StyleIds(Directory.EnumerateFiles(folder, "*.json")) : [];
+    }
+
+    private static List<string> StyleIds(IEnumerable<string> stylelists)
+    {
+        var ids = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var file in stylelists)
         {
+            if (!File.Exists(file)) continue;
             try
             {
                 using var doc = JsonDocument.Parse(File.ReadAllBytes(file));

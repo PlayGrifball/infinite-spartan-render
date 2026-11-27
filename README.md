@@ -21,7 +21,9 @@ POST /spartans
   "output": "png",     // png | glb
   "size": "small",     // small | full
   "framing": "body",   // body | head (head frames the helmet)
-  "stance": 39388885   // optional StanceId of a player's action pose; left out = the default relaxed stance
+  "stance": 39388885,  // optional StanceId of a player's action pose; left out = the default relaxed stance
+  "weapon": "VK78 Commando Rifle",   // optional, a name from the catalog's `weapons`, held in the right hand
+  "weaponCoating": "-976095822"      // optional, one of that weapon's `coatings`; left out = its default coating
 }
 -> 202 { "id": "...", "state": "queued", "output": "png" }
 
@@ -33,7 +35,7 @@ A whole Spartan, in a chosen stance and in the neutral one, is one request:
 
 ```
 POST /spartan-sets
-{ "core": "Mark VII", "armor": {}, "coating": "1120495519", "stance": 39388885, "size": "small" }   // stance is required
+{ "core": "Mark VII", "armor": {}, "coating": "1120495519", "stance": 39388885, "weapon": "VK78 Commando Rifle", "size": "small" }   // stance is required
 -> 202 { "id", "state", "items": [ { "name", "state", "output", "url" } ] }
 
 GET /spartan-sets/{id}    -> the same; state is the worst of the five: failed, else done when all are, else running or queued
@@ -50,6 +52,7 @@ rendered before costs nothing, and a GLB takes minutes. Sets, like jobs, do not 
                 "pieces": [ { "permutation": 123, "name": "Mark VII" }, { "permutation": 456, "name": null } ] } ] } ],
   "coatings": [ "-1973444192", "..." ],   // style ids, the `coating` field
   "visors": [ "...titles..." ],
+  "weapons": [ { "name": "VK78 Commando Rifle", "coreType": "WeaponCommando", "tags": [ -40348340 ], "coatings": [ "..." ] } ],
   "pendingCores": [ "Chimera" ] }          // still importing; they join when their import is done
 ```
 
@@ -60,6 +63,11 @@ warm-up from its saved import, so right after a start some cores are in `pending
 The id is a hash of the loadout and of the Blender script, so asking again returns the cached file, and a changed script never serves files an older one made. `parts` addresses a piece by the game's model region id and permutation id, for pieces that have no name (some kits). One
 entry per region; it wins over `armor` for that region, and a part that matches no mesh fails the render. A region left out of `armor` gets the core's
 default piece; `coating` left out gets the default coating; `visor` left out gets the core's default visor, and a title not in the catalog's `visors` is refused.
+
+A stance holds a weapon: the action pose item's `weaponTagId` is one of a catalog weapon's `tags`, and that weapon's `coreType` names the
+player's Halo weapon core whose equipped theme gives its coating (null for weapons with no customization). `weapon` puts it in the right hand;
+in a set it is in the stance renders and the GLB's `stance` clip only, never in the neutral pose. The list is `blender/weapons.json`;
+a weapon is in the catalog once its model is in the data folder.
 
 | size  | png                    | glb                       |
 |-------|------------------------|---------------------------|

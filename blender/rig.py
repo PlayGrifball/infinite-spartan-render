@@ -46,6 +46,8 @@ def export_glb(gltf_export, path, objects, armature):
         export_skins=True,
         export_animations=True,
         export_animation_mode="NLA_TRACKS",
+        # A weapon's visibility clip is one constant key; the exporter drops constant object channels unless told to keep them.
+        export_optimize_animation_keep_anim_object=True,
         export_image_format="JPEG",
         export_jpeg_quality=85,
     )
@@ -58,3 +60,23 @@ def texture_size(full):
 
 def has_light(rgba):
     return any(any(rgba[channel::4]) for channel in range(3))
+
+
+# A weapon's model origin is its grip; the game's rig moves this bone to where the right hand holds it.
+WEAPON_BONE = "b_r_grip"
+
+
+def add_visibility_clips(objects, shown, new_action):
+    # Per object one NLA track per clip, named like the rig's, so the exporter merges them: scaled to nothing where hidden.
+    for obj in objects:
+        animation = obj.animation_data_create()
+        scale = tuple(obj.scale)
+        for name, visible in shown.items():
+            animation.action = new_action(f"{obj.name}-{name}")
+            obj.scale = scale if visible else (0, 0, 0)
+            obj.keyframe_insert(data_path="scale", frame=1)
+            track = animation.nla_tracks.new()
+            track.name = name
+            track.strips.new(name, 1, animation.action)
+            animation.action = None
+        obj.scale = scale

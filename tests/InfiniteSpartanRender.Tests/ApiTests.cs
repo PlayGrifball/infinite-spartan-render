@@ -300,6 +300,25 @@ public class ApiTests
     }
 
     [Test]
+    public async Task AChangedWeaponsFile_ChangesTheId_SoAWeaponIsNotServedFromItsOldModel()
+    {
+        var folder = Scratch();
+        var weapons = Path.Combine(folder, "weapons.json");
+        await File.WriteAllTextAsync(Path.Combine(folder, "spartan.py"), "print(1)");
+        await File.WriteAllTextAsync(weapons, "[]");
+        _settings["Render:ScriptPath"] = Path.Combine(folder, "spartan.py");
+        _settings["Render:WeaponsPath"] = weapons;
+        Start();
+        var before = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+
+        await File.WriteAllTextAsync(weapons, """[{"name":"A","model":"a","coreType":null,"tags":[],"stylelists":[]}]""");
+        Start();
+        var after = (await (await _client.PostAsJsonAsync("/spartans", Body())).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+
+        Assert.That(after, Is.Not.EqualTo(before));
+    }
+
+    [Test]
     public async Task AnUnknownSet_Is404()
     {
         Assert.That((await _client.GetAsync("/spartan-sets/nope")).StatusCode, Is.EqualTo(HttpStatusCode.NotFound));
@@ -451,6 +470,7 @@ public class ApiTests
             Assert.That(catalog.GetProperty("pendingCores").GetArrayLength(), Is.EqualTo(new RenderOptions().Cores.Length));
             Assert.That(catalog.GetProperty("coatings").GetArrayLength(), Is.Zero);
             Assert.That(catalog.GetProperty("visors").GetArrayLength(), Is.Zero);
+            Assert.That(catalog.GetProperty("weapons").GetArrayLength(), Is.Zero);
         }
     }
 
@@ -527,6 +547,72 @@ public class ApiTests
             Assert.That(response.StatusCode, Is.EqualTo(System.Net.HttpStatusCode.OK));
             Assert.That(catalog.GetProperty("coatings").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "7" }));
             Assert.That(catalog.GetProperty("visors").GetArrayLength(), Is.Zero);
+        }
+    }
+
+    private static async Task<string> WeaponsFile(string folder)
+    {
+        var path = Path.Combine(folder, "weapons.json");
+        await File.WriteAllTextAsync(path, """
+            [
+              {"name": "VK78 Commando Rifle", "model": "commando", "coreType": "WeaponCommando", "tags": [-40348340], "stylelists": [11, 12]},
+              {"name": "Energy Sword", "model": "energy_sword", "coreType": null, "tags": [44604, 1341363070], "stylelists": [13]}
+            ]
+            """);
+        return path;
+    }
+
+    [Test]
+    public async Task TheCatalog_ListsTheWeaponsWhoseModelIsInTheData_WithTheirTagsAndTheCoatingsOfTheirStylelists()
+    {
+        var data = Scratch();
+        Directory.CreateDirectory(Path.Combine(data, "models"));
+        Directory.CreateDirectory(Path.Combine(data, "stylelists"));
+        await File.WriteAllTextAsync(Path.Combine(data, "models", "commando.ekur"), "x");
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "11.json"), """{"styles":{"5":{},"-2":{}}}""");
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "12.json"), """{"styles":{"5":{},"9":{}}}""");
+        await File.WriteAllTextAsync(Path.Combine(data, "stylelists", "13.json"), """{"styles":{"8":{}}}""");
+        _settings["Render:DataDirectory"] = data;
+        _settings["Render:WeaponsPath"] = await WeaponsFile(Scratch());
+        Start();
+
+        var weapons = (await _client.GetFromJsonAsync<JsonElement>("/catalog")).GetProperty("weapons");
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(weapons.GetArrayLength(), Is.EqualTo(1), "the sword's model is not in the data");
+            Assert.That(weapons[0].GetProperty("name").GetString(), Is.EqualTo("VK78 Commando Rifle"));
+            Assert.That(weapons[0].GetProperty("coreType").GetString(), Is.EqualTo("WeaponCommando"));
+            Assert.That(weapons[0].GetProperty("tags").EnumerateArray().Select(t => t.GetInt32()), Is.EqualTo(new[] { -40348340 }));
+            Assert.That(weapons[0].GetProperty("coatings").EnumerateArray().Select(c => c.GetString()), Is.EqualTo(new[] { "-2", "5", "9" }));
+        }
+    }
+
+    [Test]
+    public async Task TheCatalog_ListsNoWeapons_WhenTheWeaponsFileIsMalformed()
+    {
+        var file = Path.Combine(Scratch(), "weapons.json");
+        await File.WriteAllTextAsync(file, "[{truncated");
+        var service = new CatalogService(Microsoft.Extensions.Options.Options.Create(new RenderOptions { CacheDirectory = Scratch(), DataDirectory = Scratch(), EkurAssets = Scratch(), WeaponsPath = file }));
+
+        Assert.That(service.Get("").Weapons, Is.Empty);
+    }
+
+    [Test]
+    public async Task TheCatalog_AddsAWeapon_WhenItsModelIsCopiedIntoTheData()
+    {
+        var data = Scratch();
+        Directory.CreateDirectory(Path.Combine(data, "models"));
+        var service = new CatalogService(Microsoft.Extensions.Options.Options.Create(new RenderOptions { CacheDirectory = Scratch(), DataDirectory = data, EkurAssets = Scratch(), WeaponsPath = await WeaponsFile(Scratch()) }));
+        var before = service.Get("");
+        await File.WriteAllTextAsync(Path.Combine(data, "models", "energy_sword.ekur"), "x");
+
+        var after = service.Get("");
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(before.Weapons, Is.Empty);
+            Assert.That(after.Weapons.Select(w => w.Name), Is.EqualTo(new[] { "Energy Sword" }));
         }
     }
 
@@ -708,6 +794,56 @@ public class LoadoutTests
             Assert.That(set.Validate(OnlyX, JustAlpha), Is.Null);
             Assert.That(set.Validate(OnlyX, JustBeta), Does.Contain("visor"));
             Assert.That(set.Id(), Is.Not.EqualTo((set with { Visor = "Beta" }).Id()));
+        }
+    }
+
+    private static readonly string[] JustCommando = { "VK78 Commando Rifle" };
+
+    [Test]
+    public void AWeapon_MustBeInTheCatalog_AndItsCoatingIsANumericIdThatNeedsAWeapon()
+    {
+        var loadout = new Loadout { Core = "x", Weapon = "VK78 Commando Rifle", WeaponCoating = "-976095822" };
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(loadout.Validate(OnlyX, null, JustCommando), Is.Null);
+            Assert.That((loadout with { Weapon = "Nope" }).Validate(OnlyX, null, JustCommando), Does.Contain("weapon must be a name from the catalog"));
+            Assert.That((loadout with { WeaponCoating = "red" }).Validate(OnlyX, null, JustCommando), Does.Contain("weapon coating must be a numeric coating id"));
+            Assert.That((loadout with { Weapon = null }).Validate(OnlyX, null, JustCommando), Does.Contain("weapon coating needs a weapon"));
+            Assert.That(new Loadout { Core = "x" }.Validate(OnlyX, null, JustCommando), Is.Null, "no weapon is empty hands");
+        }
+    }
+
+    [Test]
+    public void ADifferentWeaponOrWeaponCoating_ChangesTheId()
+    {
+        var commando = new Loadout { Core = "x", Weapon = "VK78 Commando Rifle" };
+
+        using (Assert.EnterMultipleScope())
+        {
+            Assert.That(commando.Id(), Is.Not.EqualTo(new Loadout { Core = "x" }.Id()));
+            Assert.That(commando.Id(), Is.Not.EqualTo((commando with { Weapon = "Energy Sword" }).Id()));
+            Assert.That(commando.Id(), Is.Not.EqualTo((commando with { WeaponCoating = "7" }).Id()));
+            Assert.That(new Loadout { Core = "x", Weapon = "" }.Id(), Is.EqualTo(new Loadout { Core = "x" }.Id()), "no weapon and an empty one are the same loadout");
+        }
+    }
+
+    [Test]
+    public void ASetGivesItsWeaponToTheStanceRendersAndTheGlb_NotToTheNeutralOnes()
+    {
+        var set = new SpartanSetRequest { Core = "x", Stance = 7, Weapon = "VK78 Commando Rifle", WeaponCoating = "5" };
+
+        var items = set.Items().ToDictionary(i => i.Name, i => i.Loadout);
+
+        using (Assert.EnterMultipleScope())
+        {
+            foreach (var name in new[] { "stance-body", "stance-head", "glb" })
+                Assert.That((items[name].Weapon, items[name].WeaponCoating), Is.EqualTo(("VK78 Commando Rifle", "5")), name);
+            foreach (var name in new[] { "neutral-body", "neutral-head" })
+                Assert.That((items[name].Weapon, items[name].WeaponCoating), Is.EqualTo(((string?)null, (string?)null)), name);
+            Assert.That(set.Validate(OnlyX, null, JustCommando), Is.Null);
+            Assert.That((set with { Weapon = "Nope" }).Validate(OnlyX, null, JustCommando), Does.Contain("weapon"));
+            Assert.That(set.Id(), Is.Not.EqualTo((set with { WeaponCoating = "6" }).Id()));
         }
     }
 

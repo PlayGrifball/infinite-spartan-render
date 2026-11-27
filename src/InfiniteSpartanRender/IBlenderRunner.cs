@@ -17,6 +17,8 @@ public sealed class RenderOptions
     public string CacheDirectory { get; set; } = "/cache";
     public string DataDirectory { get; set; } = "/data";
     public string EkurAssets { get; set; } = "/opt/ekur/assets";
+    // The weapons a stance can hold: name, model file, Halo weapon core type, the action pose weaponTagIds that mean it, its stylelists.
+    public string WeaponsPath { get; set; } = "/app/blender/weapons.json";
     public string WorkDirectory { get; set; } = "/tmp/render";
     public int MaxConcurrentJobs { get; set; } = 1;
     public int MaxQueued { get; set; } = 20;
@@ -51,6 +53,7 @@ public sealed class BlenderRunner(IOptions<RenderOptions> options) : IBlenderRun
                 start.ArgumentList.Add(arg);
             start.Environment["HOME"] = work;
             start.Environment["ISR_DATA"] = o.DataDirectory;
+            start.Environment["ISR_WEAPONS"] = o.WeaponsPath;
             start.Environment["ISR_IMPORT_CACHE"] = Path.Combine(o.CacheDirectory, "imports");
             start.Environment["ISR_BAKE_CACHE"] = Path.Combine(o.CacheDirectory, "bakes");
 
