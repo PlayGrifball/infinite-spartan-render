@@ -20,6 +20,8 @@ public sealed class RenderOptions
     public string WorkDirectory { get; set; } = "/tmp/render";
     public int MaxConcurrentJobs { get; set; } = 1;
     public int MaxQueued { get; set; } = 20;
+    // Callers that send their key in X-Api-Key are named in the telemetry; a key that matches none is refused (401), no key is allowed.
+    public List<CallerKey> ApiKeys { get; set; } = [];
     public int SubmitsPerMinute { get; set; } = 60;
     public int CacheDays { get; set; } = 30;
     public int TimeoutSeconds { get; set; } = 1800;

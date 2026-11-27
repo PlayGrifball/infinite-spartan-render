@@ -13,6 +13,7 @@ builder.Services.Configure<RenderOptions>(builder.Configuration.GetSection("Rend
 builder.Services.Configure<ForwardedHeadersOptions>(o => ForwardedHeadersSetup.Apply(o, builder.Configuration.GetSection("ForwardedHeaders")));
 builder.Services.AddSingleton<IBlenderRunner, BlenderRunner>();
 builder.Services.AddSingleton<CatalogService>();
+builder.Services.AddSingleton<CallerKeys>();
 builder.Services.AddSingleton<RenderService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RenderService>());
 builder.Services.AddHealthChecks().AddCheck<ReadinessCheck>("render", tags: ["ready"]);
@@ -52,6 +53,19 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOIN
 var app = builder.Build();
 app.UseForwardedHeaders();
 app.UseRateLimiter();
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Path.StartsWithSegments("/health") && context.Request.Headers.TryGetValue(CallerKeys.Header, out var presented))
+    {
+        if (context.RequestServices.GetRequiredService<CallerKeys>().Match(presented.ToString()) is not { } caller)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+        System.Diagnostics.Activity.Current?.SetTag(CallerKeys.SpanTag, caller);
+    }
+    await next();
+});
 app.UseSwagger();
 app.UseSwaggerUI(o => o.SwaggerEndpoint("v1/swagger.json", "Infinite Spartan Render"));
 

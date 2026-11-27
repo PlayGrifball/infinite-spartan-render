@@ -9,12 +9,16 @@ public enum JobState { Queued, Running, Done, Failed }
 
 public sealed record JobStatus(string Id, JobState State, string? Error, DateTimeOffset At);
 
+// A job waiting for a slot, with the request that asked for it: its span is the render span's parent, and Caller is the
+// name of the API key the request carried (null: none), so the render shows in the caller's trace and metrics.
+public sealed record QueuedJob(string Id, Loadout Loadout, ActivityContext Parent, string? Caller);
+
 public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions> options, CatalogService catalog, ILogger<RenderService> logger) : BackgroundService
 {
     // What clients see of a failure; Blender's own output goes to the log only.
     public const string FailureMessage = "The render failed; ask again, and report it if it keeps failing.";
 
-    private readonly Channel<(string Id, Loadout Loadout)> _queue = Channel.CreateBounded<(string, Loadout)>(
+    private readonly Channel<QueuedJob> _queue = Channel.CreateBounded<QueuedJob>(
         new BoundedChannelOptions(Math.Max(1, options.Value.MaxQueued)) { FullMode = BoundedChannelFullMode.Wait });
     private readonly ConcurrentDictionary<string, JobStatus> _jobs = new();
 
@@ -50,16 +54,21 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         var id = IdOf(loadout);
         if (File.Exists(PathFor(id, loadout.Output)))
         {
-            RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", "cached"));
+            RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", "cached"), Caller(Activity.Current?.GetTagItem(CallerKeys.SpanTag) as string));
             return new JobStatus(id, JobState.Done, null, DateTimeOffset.UtcNow);
         }
 
         var queued = new JobStatus(id, JobState.Queued, null, DateTimeOffset.UtcNow);
+        var caller = Activity.Current?.GetTagItem(CallerKeys.SpanTag) as string;
         var current = _jobs.AddOrUpdate(id, queued, (_, existing) => existing.State is JobState.Queued or JobState.Running ? existing : queued);
-        if (!ReferenceEquals(current, queued)) return current;
-        if (_queue.Writer.TryWrite((id, loadout))) return current;
+        if (!ReferenceEquals(current, queued))
+        {
+            RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", "joined"), Caller(caller));
+            return current;
+        }
+        if (_queue.Writer.TryWrite(new QueuedJob(id, loadout, Activity.Current?.Context ?? default, caller))) return current;
         _jobs.TryRemove(id, out _);
-        RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", "rejected"));
+        RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", "rejected"), Caller(caller));
         return null;
     }
 
@@ -130,7 +139,7 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
                 running.RemoveAll(t => t.IsCompleted);
                 running.Add(Task.Run(async () =>
                 {
-                    try { await RunJob(item.Id, item.Loadout, stoppingToken); }
+                    try { await RunJob(item, stoppingToken); }
                     finally { slots.Release(); }
                 }, CancellationToken.None));
             }
@@ -181,13 +190,17 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         finally { File.Delete(partial); }
     }
 
-    private async Task RunJob(string id, Loadout loadout, CancellationToken cancellationToken)
+    private static KeyValuePair<string, object?> Caller(string? caller) => new("caller", caller ?? "none");
+
+    private async Task RunJob(QueuedJob job, CancellationToken cancellationToken)
     {
+        var (id, loadout, parent, caller) = job;
         _jobs[id] = new JobStatus(id, JobState.Running, null, DateTimeOffset.UtcNow);
         var final = PathFor(id, loadout.Output);
         // Ends in the real extension: Blender and its exporters append one when it is missing.
         var partial = PathFor(id + ".partial", loadout.Output);
-        using var activity = RenderTelemetry.Source.StartActivity("render");
+        using var activity = RenderTelemetry.Source.StartActivity("render", ActivityKind.Internal, parent);
+        if (caller is not null) activity?.SetTag(CallerKeys.SpanTag, caller);
         activity?.SetTag("render.id", id);
         activity?.SetTag("render.core", loadout.Core);
         activity?.SetTag("render.output", loadout.Output);
@@ -195,8 +208,8 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
         var started = Stopwatch.GetTimestamp();
         void Record(string outcome)
         {
-            RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", outcome));
-            RenderTelemetry.Duration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, new KeyValuePair<string, object?>("outcome", outcome));
+            RenderTelemetry.Jobs.Add(1, new KeyValuePair<string, object?>("outcome", outcome), Caller(caller));
+            RenderTelemetry.Duration.Record(Stopwatch.GetElapsedTime(started).TotalSeconds, new KeyValuePair<string, object?>("outcome", outcome), Caller(caller));
             activity?.SetTag("render.outcome", outcome);
         }
         try
