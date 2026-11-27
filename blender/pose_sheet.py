@@ -1,13 +1,13 @@
-# Run by Blender: blender -b --python pose_sheet.py -- out-dir
+# Run by Blender: blender -b --python pose_sheet.py (writes poses/ at the repository root)
 # Renders each weapon of weapon-poses.json in a pose that holds it, then lays the renders out in one sheet (sheet.png)
 # with a numbered legend (sheet.md), to check by eye that every weapon sits in the hands.
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+OUT = HERE.parent / "poses"
 COLUMNS = 6
 CELL = (350, 500)
 
@@ -56,7 +56,7 @@ def compose(pngs, out):
 def main():
     import bpy
 
-    out = Path(sys.argv[sys.argv.index("--") + 1])
+    out = OUT
     out.mkdir(parents=True, exist_ok=True)
     poses = json.loads((HERE / "weapon-poses.json").read_text())
     pngs = []
