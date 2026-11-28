@@ -497,7 +497,12 @@ def test_a_weapons_rest_is_its_own_transform_not_a_world_matrix_blender_has_not_
         def copy(self):
             return Matrix(self.scale)
 
-    part = SimpleNamespace(matrix_basis=Matrix(3.048), matrix_world=Matrix(1.0))
+    class Part:
+        # Hashable like a Blender object, which the rests are keyed by
+        matrix_basis = Matrix(3.048)
+        matrix_world = Matrix(1.0)
+
+    part = Part()
 
     rests = rig.weapon_rests([part])
 
