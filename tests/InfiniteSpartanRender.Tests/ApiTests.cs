@@ -1021,10 +1021,8 @@ public class BlenderRunnerTests
     {
         var args = BlenderRunner.Arguments("/app/blender/spartan.py", "/w/loadout.json", "/w/out.png");
 
-        Assert.That(args, Is.EqualTo(new[]
-        {
-            "-b", "--factory-startup", "--python-use-system-env", "--python", "/app/blender/spartan.py", "--", "/w/loadout.json", "/w/out.png",
-        }));
+        Assert.That(string.Join(' ', args),
+            Is.EqualTo("-b --factory-startup --python-use-system-env --python /app/blender/spartan.py -- /w/loadout.json /w/out.png"));
     }
 
     [Test]
