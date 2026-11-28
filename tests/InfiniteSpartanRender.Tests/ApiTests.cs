@@ -343,6 +343,10 @@ public class ApiTests
         await File.WriteAllTextAsync(poses, """[{"pose":"A","stance":1,"weaponTag":null}]""");
         _settings["Render:ScriptPath"] = Path.Combine(folder, "spartan.py");
         _settings["Render:PosesPath"] = poses;
+        var data = Scratch();
+        Directory.CreateDirectory(Path.Combine(data, "stances"));
+        await File.WriteAllTextAsync(Path.Combine(data, "stances", "anim_1_1.ekuranim"), "x");
+        _settings["Render:DataDirectory"] = data;
         Start();
         var before = await IdsAsync();
 
@@ -643,12 +647,16 @@ public class ApiTests
     }
 
     [Test]
-    public async Task TheCatalog_ListsThePoses_WithTheWeaponEachHolds()
+    public async Task TheCatalog_ListsThePosesWhoseStanceIsInTheData_WithTheWeaponEachHolds()
     {
         var folder = Scratch();
         var poses = Path.Combine(folder, "poses.json");
-        await File.WriteAllTextAsync(poses, """[{"pose":"Captain's Pride","stance":11,"weaponTag":44604},{"pose":"Wave","stance":12,"weaponTag":null},{"pose":"Odd","stance":13,"weaponTag":9}]""");
-        var service = new CatalogService(Microsoft.Extensions.Options.Options.Create(new RenderOptions { CacheDirectory = Scratch(), DataDirectory = Scratch(), EkurAssets = Scratch(), WeaponsPath = await WeaponsFile(Scratch()), PosesPath = poses }));
+        await File.WriteAllTextAsync(poses, """[{"pose":"Captain's Pride","stance":11,"weaponTag":44604},{"pose":"Wave","stance":12,"weaponTag":null},{"pose":"Odd","stance":13,"weaponTag":9},{"pose":"Gone","stance":-14,"weaponTag":null}]""");
+        var data = Scratch();
+        Directory.CreateDirectory(Path.Combine(data, "stances"));
+        foreach (var stance in new[] { 11, 12, 13 })
+            await File.WriteAllTextAsync(Path.Combine(data, "stances", $"anim_{stance}_1.ekuranim"), "x");
+        var service = new CatalogService(Microsoft.Extensions.Options.Options.Create(new RenderOptions { CacheDirectory = Scratch(), DataDirectory = data, EkurAssets = Scratch(), WeaponsPath = await WeaponsFile(Scratch()), PosesPath = poses }));
 
         var listed = service.Get("").Poses;
 
@@ -929,7 +937,9 @@ public class LoadoutTests
             Assert.That(model.Validate(OnlyX, null, CommandoAndSword, TwoPoses), Is.Null);
             Assert.That((model with { Output = "png" }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Does.Contain("extra poses need output glb"));
             Assert.That((model with { ExtraPoses = [13] }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Does.Contain("extra poses must be stances from the catalog's poses"));
-            Assert.That((model with { ExtraPoses = [.. Enumerable.Range(0, 129)] }).Validate(OnlyX, null, CommandoAndSword, null), Does.Contain("at most 128"));
+            Assert.That((model with { ExtraPoses = [.. Enumerable.Range(0, 17)] }).Validate(OnlyX, null, CommandoAndSword, null), Does.Contain("at most 16"));
+            Assert.That((model with { ExtraPoses = [14] }).Validate(OnlyX, null, CommandoAndSword, [.. TwoPoses, new("Noble Justice", 14, "M247 HMG")]), Does.Contain("extra poses hold a weapon whose model is not in the data"));
+            Assert.That((model with { WeaponCoatings = new() { ["Energy Sword"] = "" } }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Is.Null, "an empty coating is the default");
             Assert.That((model with { WeaponCoatings = new() { ["Nope"] = "9" } }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Does.Contain("weapon coatings name a weapon from the catalog"));
             Assert.That((model with { WeaponCoatings = new() { ["Energy Sword"] = "5" } }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Does.Contain("weapon coatings are each one of that weapon's coatings"));
             Assert.That((model with { WeaponCoatings = null, ExtraPoses = null }).Validate(OnlyX, null, CommandoAndSword, TwoPoses), Is.Null);
@@ -948,6 +958,8 @@ public class LoadoutTests
             Assert.That(model.Id(), Is.Not.EqualTo((model with { WeaponCoatings = new() { ["A"] = "1" } }).Id()));
             Assert.That(model.Id(), Is.EqualTo((model with { WeaponCoatings = new() { ["B"] = "2", ["A"] = "1" } }).Id()));
             Assert.That(new Loadout { Core = "x", WeaponCoatings = new(), ExtraPoses = [] }.Id(), Is.EqualTo(new Loadout { Core = "x" }.Id()), "empty lists are no extras");
+            Assert.That(new Loadout { Core = "x", WeaponCoatings = new() { ["A"] = "1" } }.Id(), Is.EqualTo(new Loadout { Core = "x" }.Id()), "weapon coatings only matter with extra poses");
+            Assert.That(model.Id(), Is.EqualTo((model with { WeaponCoatings = new() { ["A"] = "1", ["B"] = "2", ["C"] = "" } }).Id()), "an empty coating is the default");
         }
     }
 

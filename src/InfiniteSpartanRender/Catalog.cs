@@ -59,6 +59,7 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
         files.Add(Path.Combine(o.EkurAssets, "all_visors.json"));
         files.Add(o.WeaponsPath);
         files.Add(o.PosesPath);
+        files.Add(Path.Combine(o.DataDirectory, "stances"));
         files.AddRange(WeaponEntries().Select(w => ModelPath(o.DataDirectory, w.Model)));
         return string.Join('\n', files.Select(FileSignature));
     }
@@ -72,10 +73,12 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
             var core = ReadCore(PathFor(name, renderer), name);
             if (core is null) pending.Add(name); else cores.Add(core);
         }
-        return new Catalog(cores, Coatings(o.DataDirectory), Visors(o.EkurAssets), pending, Weapons(o), Poses(o.PosesPath));
+        return new Catalog(cores, Coatings(o.DataDirectory), Visors(o.EkurAssets), pending, Weapons(o), Poses(o));
     }
 
-    private static string FileSignature(string f) => new FileInfo(f) is { Exists: true } i ? $"{f}|{i.Length}|{i.LastWriteTimeUtc.Ticks}" : f + "|missing";
+    // A folder by its last change (a file added or removed), a file by its size and last change
+    private static string FileSignature(string f) => Directory.Exists(f) ? $"{f}|{Directory.GetLastWriteTimeUtc(f).Ticks}"
+        : new FileInfo(f) is { Exists: true } i ? $"{f}|{i.Length}|{i.LastWriteTimeUtc.Ticks}" : f + "|missing";
 
     // The weapon list, read again only when its file changes
     private List<WeaponEntry> WeaponEntries()
@@ -106,12 +109,16 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
     private static string ModelPath(string dataDirectory, string model) => Path.Combine(dataDirectory, "models", model + ".ekur");
 
     // Each pose with the name of the weapon its weaponTagId means (whether or not that weapon's model is in the data)
-    private List<CatalogPose> Poses(string file)
+    private List<CatalogPose> Poses(RenderOptions o)
     {
         var byTag = WeaponEntries().SelectMany(w => (w.Tags ?? []).Select(t => (t, w.Name))).GroupBy(p => p.t).ToDictionary(g => g.Key, g => g.First().Name);
         try
         {
-            var poses = File.Exists(file) ? JsonSerializer.Deserialize<List<PoseEntry>>(File.ReadAllText(file), Web) ?? [] : [];
+            var poses = File.Exists(o.PosesPath) ? JsonSerializer.Deserialize<List<PoseEntry>>(File.ReadAllText(o.PosesPath), Web) ?? [] : [];
+            var stances = Path.Combine(o.DataDirectory, "stances");
+            // Only the poses whose animation is in the data folder: the render needs it
+            var present = Directory.Exists(stances) ? Directory.EnumerateFiles(stances, "anim_*.ekuranim").Select(f => Path.GetFileName(f).Split('_')[1]).ToHashSet() : [];
+            poses = [.. poses.Where(p => present.Contains(p.Stance.ToString(System.Globalization.CultureInfo.InvariantCulture)))];
             return [.. poses.Select(p => new CatalogPose(p.Pose, p.Stance, p.WeaponTag is int tag && byTag.TryGetValue(tag, out var name) ? name : null))];
         }
         catch (Exception e) when (e is JsonException or IOException) { return []; }

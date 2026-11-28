@@ -32,19 +32,18 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
     private readonly Lazy<string> _renderer = new(() =>
     {
         var script = options.Value.ScriptPath;
-        if (!File.Exists(script)) return "";
-        var files = new[] { script, Path.Combine(Path.GetDirectoryName(script) ?? "", "rig.py") }.Where(File.Exists);
-        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(files.SelectMany(File.ReadAllBytes).ToArray()))[..12];
+        return File.Exists(script) ? FilesHash(script, Path.Combine(Path.GetDirectoryName(script) ?? "", "rig.py")) : "";
     });
 
     public Catalog Catalog() => catalog.Get(_renderer.Value);
 
     // A model with extra poses names its clips after the poses and holds their weapons: the pose and weapon lists join its renderer
-    private readonly Lazy<string> _poses = new(() =>
-    {
-        var files = new[] { options.Value.PosesPath, options.Value.WeaponsPath }.Where(File.Exists);
-        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(files.SelectMany(File.ReadAllBytes).ToArray()))[..12];
-    });
+    private readonly Lazy<string> _poses = new(() => FilesHash(options.Value.PosesPath, options.Value.WeaponsPath));
+
+    // The files that exist, hashed together (each one's path between them, so contents cannot run into each other)
+    private static string FilesHash(params string[] paths)
+        => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            paths.Where(File.Exists).SelectMany(p => System.Text.Encoding.UTF8.GetBytes(Path.GetFileName(p) + "\n").Concat(File.ReadAllBytes(p))).ToArray()))[..12];
 
     // A held weapon's own entry joins the renderer, so a changed entry renders the loadouts holding it again, and no other
     private string IdOf(Loadout loadout)

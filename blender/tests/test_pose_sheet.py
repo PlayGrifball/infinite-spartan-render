@@ -42,3 +42,13 @@ def test_the_model_holds_the_commando_in_noble_command_with_every_pose_as_a_clip
 
     assert (loadout["Output"], loadout["Weapon"], loadout["Stance"]) == ("glb", "VK78 Commando Rifle", 1756613951)
     assert loadout["ExtraPoses"] == [1, 2]
+
+
+def test_a_failed_render_fails_the_run_with_blenders_own_reason():
+    results = [("01 A", 0, "", ""), ("02 B", 1, "out", "Error: No model for weapon 'B'")]
+
+    lines, code = pose_sheet.report(results)
+
+    assert code == 1
+    assert lines == ["01 A: ok", "02 B: failed: Error: No model for weapon 'B'"]
+    assert pose_sheet.report([("01 A", 0, "", "")])[1] == 0

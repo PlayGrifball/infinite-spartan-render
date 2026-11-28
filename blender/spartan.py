@@ -300,7 +300,9 @@ def import_weapon(name, weapon_coating):
 
     markers = rig.markers_of(importer.model, place)
     objs = rig.keep_default_build(meshes, lambda x: prop_id(x, "permutation_name"), lambda x: bpy.data.objects.remove(x, do_unlink=True), sc.collection.objects.link)
-    rig.own_materials(objs, keep + [e["obj"] for e in held.values()])
+    if not objs:
+        sys.exit(f"The model of weapon '{name}' has no meshes")
+    rig.own_materials(objs, keep + [x for e in held.values() for x in e["objs"]])
     rig.select_only(bpy.data.objects, objs)
     mp.use_default_coating = not weapon_coating
     mp.coating_id = weapon_coating
@@ -310,21 +312,20 @@ def import_weapon(name, weapon_coating):
     for material in {s.material for x in objs for s in x.material_slots if s.material and s.material.name.split(".")[0] in unknown}:
         glow(material)
     done.update(applied)
-    rig.select_only(bpy.data.objects, objs)
-    bpy.context.view_layer.objects.active = objs[0]
-    if len(objs) > 1:
-        bpy.ops.object.join()
-    obj = bpy.context.view_layer.objects.active
-    obj.name = f"weapon {name}"
-    obj.rotation_mode = "QUATERNION"
+    # The parts stay separate meshes: each part's UVs span its own texture, so one bake image per part
+    for x in objs:
+        x.rotation_mode = "QUATERNION"
     print("WEAPON", name, model.name, len(objs), "meshes", flush=True)
-    return {"obj": obj, "markers": markers, "coating": weapon_coating, "rest": obj.matrix_world.copy()}
+    return {"objs": objs, "markers": markers, "coating": weapon_coating, "rests": {x: x.matrix_world.copy() for x in objs}}
 
 
 pose_list = [p for p in rig.pose_clips(json.loads(POSES.read_text()), json.loads(WEAPONS.read_text())) if p[1] in extra_poses] if extra_poses else []
+missing_poses = sorted(extra_poses - {stance for _, stance, _ in pose_list})
+if missing_poses:
+    sys.exit(f"Extra poses not in the pose list: {missing_poses}")
 for name in dict.fromkeys(([weapon] if weapon else []) + [w for _, _, w in pose_list if w]):
     held[name] = import_weapon(name, weapon_coating if name == weapon else weapon_coatings.get(name, ""))
-weapon_of = {e["obj"]: (name, e["coating"]) for name, e in held.items()}
+weapon_of = {x: (name, e["coating"]) for name, e in held.items() for x in e["objs"]}
 print("MATS", len(done), "missing", sorted(missing))
 phase("materials")
 if problems:
@@ -356,7 +357,13 @@ def in_hand(entry):
     foregrip = markers.get(rig.FOREGRIP_MARKER, (None,))[0]
     pivot = hand @ mathutils.Vector(rig.hand_marker(markers)[0])
     off_grip = armature.matrix_world @ armature.pose.bones[rig.OFF_HAND_BONE].head
-    return rig.both_hands(hand, pivot, off_grip, mathutils.Vector(foregrip) if foregrip else None, mathutils.Matrix) @ entry["rest"]
+    return rig.both_hands(hand, pivot, off_grip, mathutils.Vector(foregrip) if foregrip else None, mathutils.Matrix)
+
+
+def place_weapon(entry):
+    hand = in_hand(entry)
+    for x, rest in entry["rests"].items():
+        x.matrix_world = hand @ rest
 
 
 # Which weapon each clip holds: the player's in their stance, none in the neutral pose, each listed pose its own
@@ -370,29 +377,31 @@ def posed(name):
     for wname, entry in held.items():
         shown = clip_weapon.get(name) == wname
         if shown:
-            entry["obj"].matrix_world = in_hand(entry)
-        rig.key_clip(entry["obj"], name, shown, bpy.data.actions.new)
+            place_weapon(entry)
+        for x, rest in entry["rests"].items():
+            rig.key_clip(x, name, shown, bpy.data.actions.new, full=tuple(rest.to_scale()))
 
 
 if output == "glb":
     neutral_path = rig.find_stance(DATA, DEFAULT_STANCE)
     if neutral_path is None:
         sys.exit(f"The default stance {DEFAULT_STANCE} is missing from the data folder")
+    pose_paths = [(title, rig.find_stance(DATA, stance)) for title, stance, _ in pose_list]
+    absent = [title for title, path in pose_paths if path is None]
+    if absent:
+        sys.exit(f"The stances of these poses are missing from the data folder: {absent}")
     # Held weapons follow the grip bone, so whatever clip plays moves them with the hand
-    for entry in held.values():
-        obj = entry["obj"]
-        obj.parent, obj.parent_type, obj.parent_bone = armature, "BONE", rig.WEAPON_BONE
+    for x in weapon_of:
+        x.parent, x.parent_type, x.parent_bone = armature, "BONE", rig.WEAPON_BONE
     bpy.context.view_layer.update()
-    clips = [("neutral", neutral_path), ("stance", stance_path)]
-    clips += [(title, path) for title, stance, _ in pose_list if (path := rig.find_stance(DATA, stance))]
-    rig.add_pose_clips(armature, clips, load_clip, posed)
+    rig.add_pose_clips(armature, [("neutral", neutral_path), ("stance", stance_path), *pose_paths], load_clip, posed)
 else:
     load_clip(stance_path, "stance")
     sc.frame_set(1)
     bpy.context.view_layer.update()
     if weapon:
-        held[weapon]["obj"].matrix_world = in_hand(held[weapon])
-keep += [e["obj"] for e in held.values()]
+        place_weapon(held[weapon])
+keep += list(weapon_of)
 phase("pose")
 
 
@@ -442,7 +451,9 @@ def bake_to_plain_materials(size):
     sc.cycles.use_denoising = False
     passes = (("color", "DIFFUSE", "sRGB"), ("rough", "ROUGHNESS", "Non-Color"), ("normal", "NORMAL", "Non-Color"), ("emit", "EMIT", "sRGB"))
     for obj in keep:
-        folder = bake_folder(size, obj)
+        # A weapon part is small on screen: half the texture size keeps a model with several weapons light
+        part_size = size // 2 if obj in weapon_of else size
+        folder = bake_folder(part_size, obj)
         files = {key: folder / f"{re.sub(r'[^A-Za-z0-9._-]+', '-', obj.name)}_{key}.png" for key, _, _ in passes} if folder else {}
         images = {}
         if files and all(f.exists() for f in files.values()):
@@ -454,7 +465,7 @@ def bake_to_plain_materials(size):
                 os.utime(files[key])
             phase("bake_reused")
         else:
-            bake_object(obj, passes, size, images)
+            bake_object(obj, passes, part_size, images)
             for key, img in images.items() if folder else ():
                 folder.mkdir(parents=True, exist_ok=True)
                 part = files[key].with_name(f"{files[key].name}.{os.getpid()}.part")

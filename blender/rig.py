@@ -80,11 +80,11 @@ WEAPON_HAND_MARKERS = ("right_hand_spartan", "right_hand")
 UNIT = 3.048
 
 
-def key_clip(obj, name, shown, new_action):
+def key_clip(obj, name, shown, new_action, full=None):
     # The object as it is now, as one NLA track named like the rig's clip, so the exporter merges them; scaled to nothing
-    # when not shown. Its own transform is left as it was.
+    # when not shown. It is left at its full size (an earlier clip's keys may have written another scale to it).
     animation = obj.animation_data_create()
-    scale = tuple(obj.scale)
+    scale = tuple(full) if full is not None else tuple(obj.scale)
     animation.action = new_action(f"{obj.name}-{name}")
     if not shown:
         obj.scale = (0, 0, 0)
@@ -314,5 +314,8 @@ def both_hands(hand, pivot, off_grip, foregrip, matrix):
 def pose_clips(poses, weapons):
     # The clips of an all-poses model: each pose's title, stance and the weapon it holds (None for empty hands or an
     # unmapped weapon).
-    by_tag = {tag: w["name"] for w in weapons for tag in w["tags"]}
+    by_tag = {}
+    for w in weapons:
+        for tag in w["tags"]:
+            by_tag.setdefault(tag, w["name"])
     return [(p["pose"], p["stance"], by_tag.get(p["weaponTag"])) for p in poses]

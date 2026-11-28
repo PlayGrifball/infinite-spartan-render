@@ -60,26 +60,36 @@ def compose(pngs, out):
     sheet.save()
 
 
+def report(results):
+    # One line per render (label, exit code, stdout, stderr), with Blender's own reason for a failure; 1 when any failed
+    lines = [f"{label}: ok" if code == 0 else f"{label}: failed: {(err or out).strip()[-300:]}" for label, code, out, err in results]
+    return lines, int(any(code != 0 for _, code, _, _ in results))
+
+
 def main():
     import bpy
 
     out = OUT
     out.mkdir(parents=True, exist_ok=True)
     poses = json.loads((HERE / "weapon-poses.json").read_text())
-    pngs = []
-    for i, loadout in enumerate(loadouts(poses)):
-        loadout_path, png = out / f"{i + 1:02d}.json", out / f"{i + 1:02d}.png"
+    results, pngs = [], []
+
+    def run(label, loadout, path):
+        loadout_path = path.with_suffix(".json")
         loadout_path.write_text(json.dumps(loadout))
-        done = subprocess.run(command(bpy.app.binary_path, loadout_path, png), env=os.environ, capture_output=True, text=True)
-        print(f"{i + 1:02d} {loadout['Weapon']}: {'ok' if done.returncode == 0 else 'failed ' + done.stdout[-300:]}", flush=True)
+        done = subprocess.run(command(bpy.app.binary_path, loadout_path, path), env=os.environ, capture_output=True, text=True)
+        results.append((label, done.returncode, done.stdout, done.stderr))
+        print(report(results[-1:])[0][0], flush=True)
+
+    for i, loadout in enumerate(loadouts(poses)):
+        png = out / f"{i + 1:02d}.png"
+        run(f"{i + 1:02d} {loadout['Weapon']}", loadout, png)
         pngs.append(png)
     compose(pngs, out / "sheet.png")
     (out / "sheet.md").write_text(legend(poses))
-    model = out / "all-poses.json"
-    model.write_text(json.dumps(model_loadout(json.loads((HERE / "poses.json").read_text()))))
-    done = subprocess.run(command(bpy.app.binary_path, model, out / "all-poses.glb"), env=os.environ, capture_output=True, text=True)
-    print(f"all poses: {'ok' if done.returncode == 0 else 'failed ' + done.stdout[-300:]}", flush=True)
+    run("all poses", model_loadout(json.loads((HERE / "poses.json").read_text())), out / "all-poses.glb")
+    return report(results)[1]
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

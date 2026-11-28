@@ -204,11 +204,13 @@ public class IntegrationTests
         Keep(output);
         var bytes = await File.ReadAllBytesAsync(output);
         var json = System.Text.Json.JsonDocument.Parse(System.Text.Encoding.UTF8.GetString(bytes, 20, BitConverter.ToInt32(bytes, 12))).RootElement;
-        var nodes = json.GetProperty("nodes").EnumerateArray().Select(n => n.TryGetProperty("name", out var name) ? name.GetString() : null).ToList();
+        var joints = json.GetProperty("skins").EnumerateArray().SelectMany(s => s.GetProperty("joints").EnumerateArray().Select(j => j.GetInt32())).ToHashSet();
+        var hammer = json.GetProperty("animations").EnumerateArray().Single(a => a.GetProperty("name").GetString() == "Ruthless War Club");
+        var keyedParts = hammer.GetProperty("channels").EnumerateArray().Count(c => c.GetProperty("target").GetProperty("path").GetString() == "scale" && !joints.Contains(c.GetProperty("target").GetProperty("node").GetInt32()));
         using (Assert.EnterMultipleScope())
         {
             Assert.That(json.GetProperty("animations").EnumerateArray().Select(a => a.GetProperty("name").GetString()), Is.EquivalentTo(HammerAndSwordClips));
-            Assert.That(nodes, Does.Contain("weapon VK78 Commando Rifle").And.Contain("weapon Gravity Hammer").And.Contain("weapon Energy Sword"));
+            Assert.That(keyedParts, Is.GreaterThan(3), "every weapon part is keyed into the clip: shown or scaled to nothing");
         }
     }
 

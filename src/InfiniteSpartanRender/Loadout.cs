@@ -50,8 +50,11 @@ public sealed record Loadout
         if (!string.IsNullOrEmpty(Coating) && !CoatingId.IsMatch(Coating)) return "coating must be a numeric coating id";
         if (!string.IsNullOrEmpty(Visor) && visors is not null && !visors.Contains(Visor)) return "visor must be a title from the catalog";
         if (WeaponProblem(weapons) is { } weapon) return weapon;
-        return ShapeProblem() ?? PosesProblem(poses) ?? ModelProblem(weapons);
+        return ShapeProblem() ?? PosesProblem(poses, weapons) ?? ModelProblem(weapons);
     }
+
+    // An extra pose costs its weapon's import and bake: a few through the API, every pose only from the pose sheet
+    public const int MaxExtraPoses = 16;
 
     private string? ShapeProblem()
     {
@@ -60,12 +63,16 @@ public sealed record Loadout
         return Framing is not ("body" or "head") ? "framing must be body or head" : null;
     }
 
-    private string? PosesProblem(IReadOnlyCollection<CatalogPose>? poses)
+    private string? PosesProblem(IReadOnlyCollection<CatalogPose>? poses, IReadOnlyCollection<CatalogWeapon>? weapons)
     {
         if (!HasExtraPoses) return null;
         if (Output != "glb") return "extra poses need output glb";
-        if (ExtraPoses!.Count > 128) return "extra poses has at most 128 entries";
-        return poses is not null && ExtraPoses.Any(s => poses.All(p => p.Stance != s)) ? "extra poses must be stances from the catalog's poses" : null;
+        if (ExtraPoses!.Count > MaxExtraPoses) return $"extra poses has at most {MaxExtraPoses} entries";
+        if (poses is null) return null;
+        var chosen = ExtraPoses.Select(s => poses.FirstOrDefault(p => p.Stance == s)).ToList();
+        if (chosen.Any(p => p is null)) return "extra poses must be stances from the catalog's poses";
+        return weapons is not null && chosen.Any(p => p!.Weapon is { } held && weapons.All(w => w.Name != held))
+            ? "extra poses hold a weapon whose model is not in the data" : null;
     }
 
     private string? WeaponProblem(IReadOnlyCollection<CatalogWeapon>? weapons)
@@ -86,7 +93,8 @@ public sealed record Loadout
         foreach (var (name, coat) in WeaponCoatings)
         {
             if (weapons.FirstOrDefault(w => w.Name == name) is not { } weapon) return "weapon coatings name a weapon from the catalog";
-            if (coat is null || !weapon.Coatings.Contains(coat)) return "weapon coatings are each one of that weapon's coatings";
+            // An empty coating is the weapon's default, as an empty WeaponCoating is
+            if (!string.IsNullOrEmpty(coat) && !weapon.Coatings.Contains(coat)) return "weapon coatings are each one of that weapon's coatings";
         }
         return null;
     }
@@ -127,7 +135,8 @@ public sealed record Loadout
             weapon = string.IsNullOrEmpty(Weapon) ? "" : Weapon,
             weaponCoating = string.IsNullOrEmpty(WeaponCoating) ? "" : WeaponCoating,
             extraPoses = (ExtraPoses ?? []).Distinct().Order(),
-            weaponCoatings = (WeaponCoatings ?? new()).OrderBy(w => w.Key, StringComparer.Ordinal).Select(w => new[] { w.Key, w.Value }),
+            // Only a model with extra poses shows other weapons; an empty coating is the default
+            weaponCoatings = (HasExtraPoses ? WeaponCoatings ?? new() : new()).Where(w => !string.IsNullOrEmpty(w.Value)).OrderBy(w => w.Key, StringComparer.Ordinal).Select(w => new[] { w.Key, w.Value }),
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..32].ToLowerInvariant();
     }

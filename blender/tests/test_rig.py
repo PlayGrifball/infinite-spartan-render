@@ -468,3 +468,18 @@ def test_both_hands_turns_the_gun_about_its_grip_point_onto_the_off_hand():
     length = (0.25 ** 2 + 0.1 ** 2) ** 0.5
     assert close(aimed, (1 + 0.3 * 0.25 / length, 0.3 * 0.1 / length, 0))
     assert rig.both_hands(hand, pivot, (1.25, 0.1, 0), None, Mat) is hand
+
+
+def test_a_hidden_weapon_gets_back_its_full_size_whatever_a_previous_clip_left_on_it():
+    gun, _, _, keys = fake_object("gun", scale=(0, 0, 0))
+
+    rig.key_clip(gun, "Wristshot", False, lambda name: name, full=(1, 1, 1))
+
+    assert [s for _, p, _, s in keys if p == "scale"] == [(0, 0, 0)]
+    assert tuple(gun.scale) == (1, 1, 1), "baked at its own size, not the scale a clip keyed"
+
+
+def test_a_tag_listed_for_two_weapons_means_the_first():
+    weapons = [{"name": "A", "tags": [5]}, {"name": "B", "tags": [5]}]
+
+    assert rig.pose_clips([{"pose": "P", "stance": 1, "weaponTag": 5}], weapons) == [("P", 1, "A")]
