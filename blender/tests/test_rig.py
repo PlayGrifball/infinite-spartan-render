@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 import rig
 
 
@@ -499,7 +501,7 @@ def test_a_weapons_rest_is_its_own_transform_not_a_world_matrix_blender_has_not_
 
     rests = rig.weapon_rests([part])
 
-    assert rests[part].scale == 3.048
+    assert rests[part].scale == pytest.approx(3.048)
     assert rests[part] is not part.matrix_basis
 
 
