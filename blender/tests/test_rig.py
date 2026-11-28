@@ -542,3 +542,29 @@ def test_regions_without_a_mesh_are_the_ones_nothing_kept_covers():
 
     assert rig.regions_without_mesh({"1", "2", "3", "4"}, kept, lambda x: x.region) == ["3", "4"]
     assert rig.regions_without_mesh({"1"}, kept, lambda x: x.region) == []
+
+
+def test_missing_pieces_name_empty_slots_and_uncovered_body_regions():
+    def col(name, *meshes):
+        return SimpleNamespace(name=name, objects=list(meshes))
+
+    def mesh(name, region):
+        return SimpleNamespace(name=name, type="MESH", region=region)
+
+    helmet, other_helmet = mesh("helmet_A", 1), mesh("helmet_B", 1)
+    pad, kit_pad = mesh("l_pad_A", 2), mesh("1_9_2", 2)
+    chest, neck = mesh("1_5_10", 10), mesh("1_5_11", 11)
+    hashed = lambda n: n.count("_") == 2 and n.replace("_", "").lstrip("-").isdigit()
+    collections = [
+        col("[REGION] C_helmet", helmet, other_helmet),
+        col("[REGION] C_l_pad", pad),
+        col("[REGION] C_body", chest, neck),
+        col("[KIT] C_l_pad_9", kit_pad),
+        col("[REGION] C_empty"),
+    ]
+
+    def missing(keep):
+        return rig.missing_pieces(collections, keep, hashed, lambda x: x.region, lambda c: c.name.split("_", 1)[1])
+
+    assert missing([helmet, kit_pad, chest, neck]) == [], "a kit part from a [KIT] collection fills its slot"
+    assert missing([chest]) == ["body/11", "helmet", "l_pad"]
