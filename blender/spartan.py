@@ -221,18 +221,9 @@ if missing_parts:
 # one slot (its pieces' region ids vary); a hashed one is several body regions, each of which needs its own piece.
 for x in sorted(keep, key=lambda o: str(prop_id(o, "region_name"))):
     print("PIECE", prop_id(x, "region_name"), prop_id(x, "permutation_name"), x.name, flush=True)
-empty = []
-for col in bpy.data.collections:
-    meshes = [x for x in col.objects if x.type == "MESH"] if col.name.startswith("[REGION]") else []
-    if not meshes:
-        continue
-    if all(HASHED.fullmatch(x.name) for x in meshes):
-        empty += [f"{region_key(col)}/{r}" for r in rig.regions_without_mesh({prop_id(x, "region_name") for x in meshes}, keep, lambda x: prop_id(x, "region_name"))]
-    elif not any(x in keep for x in meshes) and not {prop_id(x, "region_name") for x in meshes} & {prop_id(x, "region_name") for x in keep}:
-        # (a kit part from a [KIT] collection fills the slot too)
-        empty.append(region_key(col))
+empty = rig.missing_pieces(bpy.data.collections, keep, HASHED.fullmatch, lambda x: prop_id(x, "region_name"), region_key)
 if empty:
-    sys.exit(f"No piece kept for {sorted(empty)} of core '{core}'; not rendering a Spartan with pieces missing")
+    sys.exit(f"No piece kept for {empty} of core '{core}'; not rendering a Spartan with pieces missing")
 
 unknown = set(armor) - {region_key(c) for c in bpy.data.collections if c.name.startswith("[REGION]")}
 if unknown:

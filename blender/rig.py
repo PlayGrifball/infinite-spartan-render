@@ -187,6 +187,22 @@ def regions_without_mesh(regions, kept, region_of):
     return sorted(set(regions) - {region_of(x) for x in kept})
 
 
+def missing_pieces(collections, kept, hashed, region_of, key_of):
+    # Every slot must end with a piece. A named [REGION] collection is one slot (its pieces' region ids vary; a kit part
+    # from a [KIT] collection fills it too); a hashed one is several body regions, each needing its own piece.
+    kept_regions = {region_of(x) for x in kept}
+    empty = []
+    for col in collections:
+        meshes = [x for x in col.objects if x.type == "MESH"] if col.name.startswith("[REGION]") else []
+        if not meshes:
+            continue
+        if all(hashed(x.name) for x in meshes):
+            empty += [f"{key_of(col)}/{r}" for r in regions_without_mesh({region_of(x) for x in meshes}, kept, region_of)]
+        elif not any(x in kept for x in meshes) and not {region_of(x) for x in meshes} & kept_regions:
+            empty.append(key_of(col))
+    return sorted(empty)
+
+
 def select_only(objects, chosen):
     for x in objects:
         x.select_set(False)
