@@ -160,6 +160,33 @@ def keep_default_build(meshes, permutation_of, remove, link):
     return chosen
 
 
+def weapon_rests(objects):
+    # Each part's transform as imported, which placing it in the hand builds on. Its own (matrix_basis: it has no
+    # parent yet), not matrix_world: Ekur sets the 3.048 scale on the object, and the world matrix only shows it once
+    # the view layer updates.
+    return {x: x.matrix_basis.copy() for x in objects}
+
+
+def hashed_defaults(objects, permutation_of, region_of):
+    # The default pieces of a collection whose pieces have only hashed names: the permutation with pieces for the most
+    # regions (the base body; a kit's permutation may have only one), then for any region it lacks, that region's first.
+    regions = {}
+    for x in objects:
+        regions.setdefault(permutation_of(x), set()).add(region_of(x))
+    first = {permutation_of(x): i for i, x in reversed(list(enumerate(sorted(objects, key=lambda o: o.name))))}
+    best = max(regions, key=lambda p: (len(regions[p]), -first[p]))
+    chosen = [x for x in objects if permutation_of(x) == best]
+    for x in sorted(objects, key=lambda o: o.name):
+        if region_of(x) not in {region_of(c) for c in chosen}:
+            chosen.append(x)
+    return chosen
+
+
+def regions_without_mesh(regions, kept, region_of):
+    # The regions nothing kept covers: a Spartan missing a piece (a neck, a forearm) is not rendered
+    return sorted(set(regions) - {region_of(x) for x in kept})
+
+
 def select_only(objects, chosen):
     for x in objects:
         x.select_set(False)
