@@ -501,3 +501,37 @@ def test_a_weapons_rest_is_its_own_transform_not_a_world_matrix_blender_has_not_
 
     assert rests[part].scale == 3.048
     assert rests[part] is not part.matrix_basis
+
+
+def piece(name):
+    # A hashed region piece: <model>_<permutation>_<region>
+    _, permutation, region = name.split("_")
+    return SimpleNamespace(name=name, permutation=permutation, region=region)
+
+
+def test_hashed_defaults_take_the_permutation_that_covers_most_regions_not_the_first_by_name():
+    # Mark V [B]'s 2030886328 collection: a kit permutation sorts first but has only one of the three regions;
+    # taking it would drop the neck pieces
+    kit = piece("1035284876_-347764400_1250001557")
+    chest, neck, collar = (piece(f"1035284876_649265451_{r}") for r in ("1250001557", "702769714", "1798246436"))
+    other = piece("1035284876_1246348706_1250001557")
+
+    chosen = rig.hashed_defaults([kit, other, chest, neck, collar], lambda x: x.permutation, lambda x: x.region)
+
+    assert chosen == [chest, neck, collar]
+
+
+def test_hashed_defaults_give_a_region_the_chosen_permutation_lacks_its_own_first_piece():
+    a1, b1 = piece("1_10_1"), piece("1_10_2")
+    c2, c3 = piece("1_30_3"), piece("1_20_3")
+
+    chosen = rig.hashed_defaults([a1, b1, c2, c3], lambda x: x.permutation, lambda x: x.region)
+
+    assert chosen == [a1, b1, c3]
+
+
+def test_regions_without_a_mesh_are_the_ones_nothing_kept_covers():
+    kept = [piece("1_10_1"), piece("1_10_2")]
+
+    assert rig.regions_without_mesh({"1", "2", "3", "4"}, kept, lambda x: x.region) == ["3", "4"]
+    assert rig.regions_without_mesh({"1"}, kept, lambda x: x.region) == []
