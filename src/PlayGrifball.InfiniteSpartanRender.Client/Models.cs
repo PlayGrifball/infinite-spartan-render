@@ -35,6 +35,18 @@ public sealed record SpartanLoadout
 
     /// <summary>A StanceId from a player's action pose item; null is the default relaxed stance.</summary>
     public int? Stance { get; init; }
+
+    /// <summary>A weapon name from the catalog's <c>weapons</c>, held in the right hand; null or empty is empty hands.</summary>
+    public string? Weapon { get; init; }
+
+    /// <summary>A coating id from the weapon's <c>coatings</c>; null or empty is the weapon's default coating. Needs <see cref="Weapon"/>.</summary>
+    public string? WeaponCoating { get; init; }
+
+    /// <summary>More clips for a <c>glb</c>: stance ids from the catalog's <c>poses</c>, each clip named after its pose and holding its weapon.</summary>
+    public IList<int>? ExtraPoses { get; init; }
+
+    /// <summary>Weapon name to coating id, for the weapons the extra poses hold (other than <see cref="Weapon"/>, which wears <see cref="WeaponCoating"/>).</summary>
+    public IDictionary<string, string>? WeaponCoatings { get; init; }
 }
 
 /// <summary>A render job: <see cref="State"/> is queued, running, done or failed.</summary>
@@ -59,6 +71,18 @@ public sealed record SpartanSetRequest
     /// <summary>A StanceId from a player's action pose item (required by the API).</summary>
     public required int Stance { get; init; }
 
+    /// <summary>The weapon the stance holds, from the catalog: in the stance renders and the GLB's stance clip, never in the neutral pose.</summary>
+    public string? Weapon { get; init; }
+
+    /// <summary>A coating id from the weapon's <c>coatings</c>; null or empty is its default coating.</summary>
+    public string? WeaponCoating { get; init; }
+
+    /// <summary>More clips for the GLB: stance ids from the catalog's <c>poses</c>, each clip named after its pose and holding its weapon.</summary>
+    public IList<int>? ExtraPoses { get; init; }
+
+    /// <summary>Weapon name to coating id, for the weapons the extra poses hold.</summary>
+    public IDictionary<string, string>? WeaponCoatings { get; init; }
+
     public string Size { get; init; } = "small";
 }
 
@@ -80,5 +104,15 @@ public sealed record SpartanCatalogRegion(string Kind, string Key, int Region, I
 
 public sealed record SpartanCatalogCore(string Name, IReadOnlyList<SpartanCatalogRegion> Regions);
 
+/// <summary>
+/// A weapon a stance can hold. <see cref="Tags"/> are the action pose <c>weaponTagId</c>s that mean it; <see cref="CoreType"/> is the Halo
+/// weapon core (e.g. <c>WeaponCommando</c>) whose equipped theme gives its coating, null when the weapon has none; <see cref="Coatings"/> are its coating ids.
+/// </summary>
+public sealed record SpartanCatalogWeapon(string Name, string? CoreType, IReadOnlyList<int> Tags, IReadOnlyList<string> Coatings);
+
+/// <summary>A pose a GLB can carry as a clip named <see cref="Name"/>: its stance id, and the weapon it holds (null for empty hands).</summary>
+public sealed record SpartanCatalogPose(string Name, int Stance, string? Weapon);
+
 /// <summary>What a loadout may name. <see cref="PendingCores"/> are still importing and join when their import is done.</summary>
-public sealed record SpartanCatalog(IReadOnlyList<SpartanCatalogCore> Cores, IReadOnlyList<string> Coatings, IReadOnlyList<string> Visors, IReadOnlyList<string> PendingCores);
+public sealed record SpartanCatalog(IReadOnlyList<SpartanCatalogCore> Cores, IReadOnlyList<string> Coatings, IReadOnlyList<string> Visors, IReadOnlyList<string> PendingCores,
+    IReadOnlyList<SpartanCatalogWeapon>? Weapons = null, IReadOnlyList<SpartanCatalogPose>? Poses = null);

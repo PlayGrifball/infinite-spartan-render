@@ -10,8 +10,19 @@ public sealed record CatalogRegion(string Kind, string Key, int Region, IReadOnl
 
 public sealed record CatalogCore(string Name, IReadOnlyList<CatalogRegion> Regions);
 
-// What a loadout may name: cores with their pieces, coating ids and visor titles. PendingCores are still importing.
-public sealed record Catalog(IReadOnlyList<CatalogCore> Cores, IReadOnlyList<string> Coatings, IReadOnlyList<string> Visors, IReadOnlyList<string> PendingCores);
+// A weapon a stance can hold: Tags are the action pose weaponTagIds that mean it, CoreType the Halo weapon core whose equipped
+// theme gives its coating (null for weapons with no customization), Coatings the coating ids of its stylelists.
+public sealed record CatalogWeapon(string Name, string? CoreType, IReadOnlyList<int> Tags, IReadOnlyList<string> Coatings);
+
+// A pose a model can carry as a clip (named Name), by its StanceId, and the weapon it holds (null for empty hands).
+public sealed record CatalogPose(string Name, int Stance, string? Weapon);
+
+// What a loadout may name: cores with their pieces, coating ids, visor titles, weapons and poses. PendingCores are still importing.
+public sealed record Catalog(IReadOnlyList<CatalogCore> Cores, IReadOnlyList<string> Coatings, IReadOnlyList<string> Visors, IReadOnlyList<string> PendingCores, IReadOnlyList<CatalogWeapon> Weapons, IReadOnlyList<CatalogPose> Poses);
+
+internal sealed record PoseEntry(string Pose, int Stance, int? WeaponTag);
+
+internal sealed record WeaponEntry(string Name, string Model, string? CoreType, int[] Tags, int[] Stylelists);
 
 public sealed class CatalogService(IOptions<RenderOptions> options)
 {
@@ -19,12 +30,14 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
     private readonly object _lock = new();
     private string? _signature;
     private Catalog? _built;
+    private string? _weaponsSignature;
+    private List<WeaponEntry> _weaponEntries = [];
 
     // A core's catalog is written next to the cache by the warm-up, and replaced with each Blender script.
     public string PathFor(string core, string renderer)
         => Path.Combine(options.Value.CacheDirectory, "catalog", $"{renderer}-{string.Concat(core.Select(c => char.IsLetterOrDigit(c) ? c : '-'))}.json");
 
-    // Built again only when a file it reads (a core's catalog, a stylelist, the visor list) was added, removed or changed.
+    // Built again only when a file it reads (a core's catalog, a stylelist, the visor list, the weapon list or a weapon model) was added, removed or changed.
     public Catalog Get(string renderer)
     {
         var o = options.Value;
@@ -44,7 +57,11 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
         var folder = Path.Combine(o.DataDirectory, "stylelists");
         if (Directory.Exists(folder)) files.AddRange(Directory.EnumerateFiles(folder, "*.json").Order(StringComparer.Ordinal));
         files.Add(Path.Combine(o.EkurAssets, "all_visors.json"));
-        return string.Join('\n', files.Select(f => new FileInfo(f) is { Exists: true } i ? $"{f}|{i.Length}|{i.LastWriteTimeUtc.Ticks}" : f + "|missing"));
+        files.Add(o.WeaponsPath);
+        files.Add(o.PosesPath);
+        files.Add(Path.Combine(o.DataDirectory, "stances"));
+        files.AddRange(WeaponEntries().Select(w => ModelPath(o.DataDirectory, w.Model)));
+        return string.Join('\n', files.Select(FileSignature));
     }
 
     private Catalog Build(RenderOptions o, string renderer)
@@ -56,8 +73,32 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
             var core = ReadCore(PathFor(name, renderer), name);
             if (core is null) pending.Add(name); else cores.Add(core);
         }
-        return new Catalog(cores, Coatings(o.DataDirectory), Visors(o.EkurAssets), pending);
+        return new Catalog(cores, Coatings(o.DataDirectory), Visors(o.EkurAssets), pending, Weapons(o), Poses(o));
     }
+
+    // A folder by its last change (a file added or removed), a file by its size and last change
+    private static string FileSignature(string f) => Directory.Exists(f) ? $"{f}|{Directory.GetLastWriteTimeUtc(f).Ticks}"
+        : new FileInfo(f) is { Exists: true } i ? $"{f}|{i.Length}|{i.LastWriteTimeUtc.Ticks}" : f + "|missing";
+
+    // The weapon list, read again only when its file changes
+    private List<WeaponEntry> WeaponEntries()
+    {
+        var path = options.Value.WeaponsPath;
+        var signature = FileSignature(path);
+        lock (_lock)
+        {
+            if (signature != _weaponsSignature)
+            {
+                _weaponEntries = ReadWeapons(path);
+                _weaponsSignature = signature;
+            }
+            return _weaponEntries;
+        }
+    }
+
+    // The entry a weapon is rendered from, as text: part of the id of a loadout holding it, so a changed entry renders it again.
+    public string WeaponIdentity(string name)
+        => WeaponEntries().FirstOrDefault(w => w.Name == name) is { } entry ? JsonSerializer.Serialize(entry, Web) : "";
 
     private static CatalogCore? ReadCore(string file, string name)
     {
@@ -65,14 +106,50 @@ public sealed class CatalogService(IOptions<RenderOptions> options)
         catch (Exception e) when (e is JsonException or IOException) { return null; }
     }
 
+    private static string ModelPath(string dataDirectory, string model) => Path.Combine(dataDirectory, "models", model + ".ekur");
+
+    // Each pose with the name of the weapon its weaponTagId means (whether or not that weapon's model is in the data)
+    private List<CatalogPose> Poses(RenderOptions o)
+    {
+        var byTag = WeaponEntries().SelectMany(w => (w.Tags ?? []).Select(t => (t, w.Name))).GroupBy(p => p.t).ToDictionary(g => g.Key, g => g.First().Name);
+        try
+        {
+            var poses = File.Exists(o.PosesPath) ? JsonSerializer.Deserialize<List<PoseEntry>>(File.ReadAllText(o.PosesPath), Web) ?? [] : [];
+            var stances = Path.Combine(o.DataDirectory, "stances");
+            // Only the poses whose animation is in the data folder: the render needs it
+            var present = Directory.Exists(stances) ? Directory.EnumerateFiles(stances, "anim_*.ekuranim").Select(f => Path.GetFileName(f).Split('_')[1]).ToHashSet() : [];
+            poses = [.. poses.Where(p => present.Contains(p.Stance.ToString(System.Globalization.CultureInfo.InvariantCulture)))];
+            return [.. poses.Select(p => new CatalogPose(p.Pose, p.Stance, p.WeaponTag is int tag && byTag.TryGetValue(tag, out var name) ? name : null))];
+        }
+        catch (Exception e) when (e is JsonException or IOException) { return []; }
+    }
+
+    private static List<WeaponEntry> ReadWeapons(string file)
+    {
+        try { return File.Exists(file) ? JsonSerializer.Deserialize<List<WeaponEntry>>(File.ReadAllText(file), Web) ?? [] : []; }
+        catch (Exception e) when (e is JsonException or IOException) { return []; }
+    }
+
+    // The weapons whose model is in the data folder, each with the coatings of its own stylelists.
+    private List<CatalogWeapon> Weapons(RenderOptions o)
+        => WeaponEntries()
+            .Where(w => File.Exists(ModelPath(o.DataDirectory, w.Model)))
+            .Select(w => new CatalogWeapon(w.Name, w.CoreType, w.Tags ?? [], StyleIds((w.Stylelists ?? []).Select(id => Path.Combine(o.DataDirectory, "stylelists", $"{id}.json")))))
+            .ToList();
+
     // The style ids Ekur accepts as a coating: the keys of "styles" in every stylelist (a file that is not readable JSON adds none).
     private static List<string> Coatings(string dataDirectory)
     {
-        var ids = new SortedSet<string>(StringComparer.Ordinal);
         var folder = Path.Combine(dataDirectory, "stylelists");
-        if (!Directory.Exists(folder)) return [];
-        foreach (var file in Directory.EnumerateFiles(folder, "*.json"))
+        return Directory.Exists(folder) ? StyleIds(Directory.EnumerateFiles(folder, "*.json")) : [];
+    }
+
+    private static List<string> StyleIds(IEnumerable<string> stylelists)
+    {
+        var ids = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var file in stylelists)
         {
+            if (!File.Exists(file)) continue;
             try
             {
                 using var doc = JsonDocument.Parse(File.ReadAllBytes(file));

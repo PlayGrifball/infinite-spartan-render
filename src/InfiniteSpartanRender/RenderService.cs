@@ -28,16 +28,29 @@ public sealed class RenderService(IBlenderRunner runner, IOptions<RenderOptions>
 
     public string CachedPath(string id, string output) => PathFor(id, output);
 
-    // The Blender script is the renderer: any change to it changes every id, so old files are never served.
+    // The Blender scripts are the renderer: any change to them changes every id, so old files are never served.
     private readonly Lazy<string> _renderer = new(() =>
     {
         var script = options.Value.ScriptPath;
-        return File.Exists(script) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(script)))[..12] : "";
+        return File.Exists(script) ? FilesHash(script, Path.Combine(Path.GetDirectoryName(script) ?? "", "rig.py")) : "";
     });
 
     public Catalog Catalog() => catalog.Get(_renderer.Value);
 
-    private string IdOf(Loadout loadout) => loadout.Id(_renderer.Value);
+    // A model with extra poses names its clips after the poses and holds their weapons: the pose and weapon lists join its renderer
+    private readonly Lazy<string> _poses = new(() => FilesHash(options.Value.PosesPath, options.Value.WeaponsPath));
+
+    // The files that exist, hashed together (each one's path between them, so contents cannot run into each other)
+    private static string FilesHash(params string[] paths)
+        => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            paths.Where(File.Exists).SelectMany(p => System.Text.Encoding.UTF8.GetBytes(Path.GetFileName(p) + "\n").Concat(File.ReadAllBytes(p))).ToArray()))[..12];
+
+    // A held weapon's own entry joins the renderer, so a changed entry renders the loadouts holding it again, and no other
+    private string IdOf(Loadout loadout)
+    {
+        var renderer = string.IsNullOrEmpty(loadout.Weapon) ? _renderer.Value : $"{_renderer.Value}|{catalog.WeaponIdentity(loadout.Weapon)}";
+        return loadout.Id(loadout.HasExtraPoses ? $"{renderer}|poses {_poses.Value}" : renderer);
+    }
 
     // Done when the file is in the cache (survives restarts); otherwise whatever this process knows about the job.
     // A job lost to a restart is unknown here: the client posts the loadout again.

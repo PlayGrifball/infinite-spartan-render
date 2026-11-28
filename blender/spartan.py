@@ -17,6 +17,8 @@ sys.path.insert(0, str(Path(sys.argv[sys.argv.index("--python") + 1]).resolve().
 import rig  # noqa: E402
 
 DATA = os.environ.get("ISR_DATA", "/data")
+WEAPONS = Path(os.environ.get("ISR_WEAPONS") or Path(sys.argv[sys.argv.index("--python") + 1]).resolve().parent / "weapons.json")
+POSES = Path(os.environ.get("ISR_POSES") or Path(sys.argv[sys.argv.index("--python") + 1]).resolve().parent / "poses.json")
 EKUR_ASSETS = "/opt/ekur/assets"
 DEFAULT_STANCE = -1258174396
 MOD = "bl_ext.user_default.ekur"
@@ -46,6 +48,11 @@ stance_id = loadout.get("Stance")
 if stance_id is None:
     stance_id = DEFAULT_STANCE
 framing = loadout.get("Framing", "body")
+weapon = loadout.get("Weapon") or ""
+weapon_coating = loadout.get("WeaponCoating") or ""
+# A model can carry more poses of poses.json as clips (by stance id), each holding its weapon in the coating WeaponCoatings names
+extra_poses = set(loadout.get("ExtraPoses") or []) if output == "glb" else set()
+weapon_coatings = loadout.get("WeaponCoatings") or {}
 
 addon_utils.enable(MOD, default_set=True)
 bpy.context.preferences.addons[MOD].preferences.data_folder = DATA
@@ -222,10 +229,7 @@ keep = list(dict.fromkeys(keep))
 for x in list(bpy.data.objects):
     if x.type == "MESH" and x not in keep:
         bpy.data.objects.remove(x, do_unlink=True)
-for x in bpy.data.objects:
-    x.select_set(False)
-for x in keep:
-    x.select_set(True)
+rig.select_only(bpy.data.objects, keep)
 
 mp = sc.material_properties
 mp.selected_only = True
@@ -246,34 +250,82 @@ if visor:
     visor_shader.read_json_file = lambda path, T: read_ekur_json(
         Path(f"{EKUR_ASSETS}/all_visors.json") if Path(path).name == "all_visors.json" else path, T)
 
-mo =importlib.import_module(MOD + ".src.operators.material_operator")
+mo = importlib.import_module(MOD + ".src.operators.material_operator")
 ju = importlib.import_module(MOD + ".src.utils")
 jd = importlib.import_module(MOD + ".src.json_definitions")
 done = set()
 missing = set()
 problems = []
-for slot in mo.get_materials():
-    if not slot.material or not slot.material.node_tree:
-        continue
-    n = slot.name.split(".")[0]
-    if n in done or n in missing:
-        continue
-    p = Path(f"{DATA}/materials/{n}.json")
-    if not p.exists():
-        missing.add(n)
-        if re.fullmatch(r"-?\d+", n):
-            problems.append(f"material {n}: no JSON in the data folder")
-        continue
-    mo.remove_nodes(slot.material.node_tree)
-    m = ju.read_json_file(p, jd.CommonMaterial)
-    done.add(n)
-    if m is None:
-        problems.append(f"material {n}: unreadable JSON")
-        continue
-    try:
-        mo.run_material(m, slot.material.node_tree)
-    except Exception as e:
-        problems.append(f"material {n}: {e!r}"[:200])
+
+
+def apply_materials(applied, unknown=None):
+    rig.apply_materials(mo.get_materials(), DATA, mo, lambda p: ju.read_json_file(p, jd.CommonMaterial), applied, missing, problems, unknown)
+
+
+def glow(material):
+    # A shader Ekur's dump lacks (energy blades, holograms) would render as an empty black material: draw it as a pale plasma glow
+    tree = material.node_tree
+    tree.nodes.clear()
+    out = tree.nodes.new("ShaderNodeOutputMaterial")
+    emit = tree.nodes.new("ShaderNodeEmission")
+    emit.inputs["Color"].default_value = (0.45, 0.75, 1.0, 1.0)
+    emit.inputs["Strength"].default_value = 1.0
+    tree.links.new(emit.outputs["Emission"], out.inputs["Surface"])
+
+
+apply_materials(done)
+
+model_importer = importlib.import_module(MOD + ".src.model.importer.model_importer")
+bone_transforms = importlib.import_module(MOD + ".src.model.importer.bone").get_bone_transforms
+held = {}
+
+
+def import_weapon(name, weapon_coating):
+    # A weapon's default build in its coating, joined into one object (one set of baked textures), with its markers
+    model = rig.weapon_model(WEAPONS, DATA, name)
+    if model is None:
+        sys.exit(f"No model for weapon '{name}' in the data folder")
+    importer = model_importer.ModelImporter()
+    meshes = [x for x in importer.start_import(str(model), bones=False) if x.type == "MESH"]
+    nodes = bone_transforms(importer.model) if importer.model.bones else []
+
+    def place(node, position, rotation):
+        # A marker is relative to its node (a pump or a hammer head may hold the foregrip): put it in the model's space
+        if node >= len(nodes):
+            return position, rotation
+        x, y, z, w = rotation
+        local = mathutils.Matrix.LocRotScale(position, mathutils.Quaternion((w, x, y, z)), (1, 1, 1))
+        loc, rot, _ = (nodes[node] @ local).decompose()
+        return tuple(loc), (rot.x, rot.y, rot.z, rot.w)
+
+    markers = rig.markers_of(importer.model, place)
+    objs = rig.keep_default_build(meshes, lambda x: prop_id(x, "permutation_name"), lambda x: bpy.data.objects.remove(x, do_unlink=True), sc.collection.objects.link)
+    if not objs:
+        sys.exit(f"The model of weapon '{name}' has no meshes")
+    rig.own_materials(objs, keep + [x for e in held.values() for x in e["objs"]])
+    rig.select_only(bpy.data.objects, objs)
+    mp.use_default_coating = not weapon_coating
+    mp.coating_id = weapon_coating
+    mp.override_visor = False
+    applied, unknown = set(), set()
+    apply_materials(applied, unknown)
+    for material in {s.material for x in objs for s in x.material_slots if s.material and s.material.name.split(".")[0] in unknown}:
+        glow(material)
+    done.update(applied)
+    # The parts stay separate meshes: each part's UVs span its own texture, so one bake image per part
+    for x in objs:
+        x.rotation_mode = "QUATERNION"
+    print("WEAPON", name, model.name, len(objs), "meshes", flush=True)
+    return {"objs": objs, "markers": markers, "coating": weapon_coating, "rests": {x: x.matrix_world.copy() for x in objs}}
+
+
+pose_list = [p for p in rig.pose_clips(json.loads(POSES.read_text()), json.loads(WEAPONS.read_text())) if p[1] in extra_poses] if extra_poses else []
+missing_poses = sorted(extra_poses - {stance for _, stance, _ in pose_list})
+if missing_poses:
+    sys.exit(f"Extra poses not in the pose list: {missing_poses}")
+for name in dict.fromkeys(([weapon] if weapon else []) + [w for _, _, w in pose_list if w]):
+    held[name] = import_weapon(name, weapon_coating if name == weapon else weapon_coatings.get(name, ""))
+weapon_of = {x: (name, e["coating"]) for name, e in held.items() for x in e["objs"]}
 print("MATS", len(done), "missing", sorted(missing))
 phase("materials")
 if problems:
@@ -296,25 +348,75 @@ def load_clip(path, name):
     return rig.read_clip(anim_data, anim_import, armature, path, name)
 
 
+def in_hand(entry):
+    # Where a held weapon goes in the current pose: on the grip by its hand marker, then turned about its own grip point
+    # so a two-handed pose puts the foregrip in the off hand
+    markers = entry["markers"]
+    offset, turn = rig.hand_offset(markers)
+    hand = rig.hand_matrix(armature, mathutils.Matrix, mathutils.Matrix.LocRotScale(offset, mathutils.Quaternion(turn), (1, 1, 1)))
+    foregrip = markers.get(rig.FOREGRIP_MARKER, (None,))[0]
+    pivot = hand @ mathutils.Vector(rig.hand_marker(markers)[0])
+    off_grip = armature.matrix_world @ armature.pose.bones[rig.OFF_HAND_BONE].head
+    return rig.both_hands(hand, pivot, off_grip, mathutils.Vector(foregrip) if foregrip else None, mathutils.Matrix)
+
+
+def place_weapon(entry):
+    hand = in_hand(entry)
+    for x, rest in entry["rests"].items():
+        x.matrix_world = hand @ rest
+
+
+# Which weapon each clip holds: the player's in their stance, none in the neutral pose, each listed pose its own
+clip_weapon = {"neutral": None, "stance": weapon or None, **{title: w for title, _, w in pose_list}}
+
+
+def posed(name):
+    # Every weapon is keyed into every clip: in the hand where the pose holds it, scaled to nothing elsewhere
+    sc.frame_set(1)
+    bpy.context.view_layer.update()
+    for wname, entry in held.items():
+        shown = clip_weapon.get(name) == wname
+        if shown:
+            place_weapon(entry)
+        for x, rest in entry["rests"].items():
+            rig.key_clip(x, name, shown, bpy.data.actions.new, full=tuple(rest.to_scale()))
+
+
 if output == "glb":
     neutral_path = rig.find_stance(DATA, DEFAULT_STANCE)
     if neutral_path is None:
         sys.exit(f"The default stance {DEFAULT_STANCE} is missing from the data folder")
-    rig.add_pose_clips(armature, (("neutral", neutral_path), ("stance", stance_path)), load_clip)
+    pose_paths = [(title, rig.find_stance(DATA, stance)) for title, stance, _ in pose_list]
+    absent = [title for title, path in pose_paths if path is None]
+    if absent:
+        sys.exit(f"The stances of these poses are missing from the data folder: {absent}")
+    # Held weapons follow the grip bone, so whatever clip plays moves them with the hand
+    for x in weapon_of:
+        x.parent, x.parent_type, x.parent_bone = armature, "BONE", rig.WEAPON_BONE
+    bpy.context.view_layer.update()
+    rig.add_pose_clips(armature, [("neutral", neutral_path), ("stance", stance_path), *pose_paths], load_clip, posed)
 else:
     load_clip(stance_path, "stance")
-sc.frame_set(1)
+    sc.frame_set(1)
+    bpy.context.view_layer.update()
+    if weapon:
+        place_weapon(held[weapon])
+keep += list(weapon_of)
 phase("pose")
 
 
-def bake_folder(size):
-    # The baked textures depend on the loadout, not the stance (a pose moves vertices, not UVs): keep them per loadout.
+SCRIPTS = [Path(sys.argv[sys.argv.index("--python") + 1]).resolve(), Path(sys.argv[sys.argv.index("--python") + 1]).resolve().parent / "rig.py"]
+
+
+def bake_folder(size, obj):
+    # The baked textures depend on the loadout, not the stance (a pose moves vertices, not UVs): the armor's per armor, a held weapon's per weapon.
     cache = os.environ.get("ISR_BAKE_CACHE")
     if not cache:
         return None
-    renderer = hashlib.sha256(Path(sys.argv[sys.argv.index("--python") + 1]).read_bytes()).hexdigest()
-    ident = json.dumps([renderer, tool_version(), core, sorted(armor.items()), coating, visor, disable_damage, size], sort_keys=True)
-    return Path(cache) / hashlib.sha256(ident.encode()).hexdigest()[:32]
+    if obj in weapon_of:
+        name, weapon_coat = weapon_of[obj]
+        return rig.bake_key(cache, SCRIPTS, "weapon", [tool_version(), rig.weapon_entry(WEAPONS, name), weapon_coat, disable_damage, size])
+    return rig.bake_key(cache, SCRIPTS, "armor", [tool_version(), core, sorted(armor.items()), sorted(parts.items()), coating, visor, disable_damage, size])
 
 
 def bake_object(obj, passes, size, images):
@@ -348,8 +450,10 @@ def bake_to_plain_materials(size):
     sc.cycles.samples = 1
     sc.cycles.use_denoising = False
     passes = (("color", "DIFFUSE", "sRGB"), ("rough", "ROUGHNESS", "Non-Color"), ("normal", "NORMAL", "Non-Color"), ("emit", "EMIT", "sRGB"))
-    folder = bake_folder(size)
     for obj in keep:
+        # A weapon part is small on screen: half the texture size keeps a model with several weapons light
+        part_size = size // 2 if obj in weapon_of else size
+        folder = bake_folder(part_size, obj)
         files = {key: folder / f"{re.sub(r'[^A-Za-z0-9._-]+', '-', obj.name)}_{key}.png" for key, _, _ in passes} if folder else {}
         images = {}
         if files and all(f.exists() for f in files.values()):
@@ -361,7 +465,7 @@ def bake_to_plain_materials(size):
                 os.utime(files[key])
             phase("bake_reused")
         else:
-            bake_object(obj, passes, size, images)
+            bake_object(obj, passes, part_size, images)
             for key, img in images.items() if folder else ():
                 folder.mkdir(parents=True, exist_ok=True)
                 part = files[key].with_name(f"{files[key].name}.{os.getpid()}.part")
@@ -406,9 +510,11 @@ def bake_to_plain_materials(size):
 
 if output == "glb":
     rig.show_armature_modifiers(keep)
+    rig.mute_clips(weapon_of, True)
     bpy.context.view_layer.update()
     phase("mesh")
     bake_to_plain_materials(rig.texture_size(full))
+    rig.mute_clips(weapon_of, False)
     rig.export_glb(bpy.ops.export_scene.gltf, out, keep, armature)
     phase("export")
     sys.exit(0)
