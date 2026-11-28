@@ -160,6 +160,49 @@ def keep_default_build(meshes, permutation_of, remove, link):
     return chosen
 
 
+def weapon_rests(objects):
+    # Each part's transform as imported, which placing it in the hand builds on. Its own (matrix_basis: it has no
+    # parent yet), not matrix_world: Ekur sets the 3.048 scale on the object, and the world matrix only shows it once
+    # the view layer updates.
+    return {x: x.matrix_basis.copy() for x in objects}
+
+
+def hashed_defaults(objects, permutation_of, region_of):
+    # The default pieces of a collection whose pieces have only hashed names: the permutation with pieces for the most
+    # regions (the base body; a kit's permutation may have only one), then for any region it lacks, that region's first.
+    regions = {}
+    for x in objects:
+        regions.setdefault(permutation_of(x), set()).add(region_of(x))
+    first = {permutation_of(x): i for i, x in reversed(list(enumerate(sorted(objects, key=lambda o: o.name))))}
+    best = max(regions, key=lambda p: (len(regions[p]), -first[p]))
+    chosen = [x for x in objects if permutation_of(x) == best]
+    for x in sorted(objects, key=lambda o: o.name):
+        if region_of(x) not in {region_of(c) for c in chosen}:
+            chosen.append(x)
+    return chosen
+
+
+def regions_without_mesh(regions, kept, region_of):
+    # The regions nothing kept covers: a Spartan missing a piece (a neck, a forearm) is not rendered
+    return sorted(set(regions) - {region_of(x) for x in kept})
+
+
+def missing_pieces(collections, kept, hashed, region_of, key_of):
+    # Every slot must end with a piece. A named [REGION] collection is one slot (its pieces' region ids vary; a kit part
+    # from a [KIT] collection fills it too); a hashed one is several body regions, each needing its own piece.
+    kept_regions = {region_of(x) for x in kept}
+    empty = []
+    for col in collections:
+        meshes = [x for x in col.objects if x.type == "MESH"] if col.name.startswith("[REGION]") else []
+        if not meshes:
+            continue
+        if all(hashed(x.name) for x in meshes):
+            empty += [f"{key_of(col)}/{r}" for r in regions_without_mesh({region_of(x) for x in meshes}, kept, region_of)]
+        elif not any(x in kept for x in meshes) and not {region_of(x) for x in meshes} & kept_regions:
+            empty.append(key_of(col))
+    return sorted(empty)
+
+
 def select_only(objects, chosen):
     for x in objects:
         x.select_set(False)

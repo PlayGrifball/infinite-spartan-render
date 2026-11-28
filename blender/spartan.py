@@ -204,8 +204,7 @@ for col in bpy.data.collections:
     if not objs:
         continue
     if all(HASHED.fullmatch(x.name) for x in objs):
-        first = objs[0].name.split("_")[1]
-        keep += [x for x in objs if x.name.split("_")[1] == first]
+        keep += rig.hashed_defaults(objs, lambda x: prop_id(x, "permutation_name"), lambda x: prop_id(x, "region_name"))
         continue
     wanted = armor.get(region_key(col))
     chosen = next((x for x in objs if wanted and x.name.split(".")[0].endswith("_" + wanted)), None)
@@ -217,6 +216,14 @@ for col in bpy.data.collections:
 missing_parts = {r: p for r, p in parts.items() if r not in matched_parts}
 if missing_parts:
     sys.exit(f"No mesh for parts (region: permutation): {missing_parts}")
+
+# Every slot must end with a piece: a Spartan missing one (a neck, a shoulder pad) is not rendered. A named collection is
+# one slot (its pieces' region ids vary); a hashed one is several body regions, each of which needs its own piece.
+for x in sorted(keep, key=lambda o: str(prop_id(o, "region_name"))):
+    print("PIECE", prop_id(x, "region_name"), prop_id(x, "permutation_name"), x.name, flush=True)
+empty = rig.missing_pieces(bpy.data.collections, keep, HASHED.fullmatch, lambda x: prop_id(x, "region_name"), region_key)
+if empty:
+    sys.exit(f"No piece kept for {empty} of core '{core}'; not rendering a Spartan with pieces missing")
 
 unknown = set(armor) - {region_key(c) for c in bpy.data.collections if c.name.startswith("[REGION]")}
 if unknown:
@@ -316,7 +323,7 @@ def import_weapon(name, weapon_coating):
     for x in objs:
         x.rotation_mode = "QUATERNION"
     print("WEAPON", name, model.name, len(objs), "meshes", flush=True)
-    return {"objs": objs, "markers": markers, "coating": weapon_coating, "rests": {x: x.matrix_world.copy() for x in objs}}
+    return {"objs": objs, "markers": markers, "coating": weapon_coating, "rests": rig.weapon_rests(objs)}
 
 
 pose_list = [p for p in rig.pose_clips(json.loads(POSES.read_text()), json.loads(WEAPONS.read_text())) if p[1] in extra_poses] if extra_poses else []
