@@ -31,7 +31,7 @@ jobs:
       - name: Render the poses
         run: |
           ISR_IMPORT_CACHE="$RUNNER_TEMP/imports" ISR_BAKE_CACHE="$RUNNER_TEMP/bakes" \
-            /opt/blender/blender -b --factory-startup --python blender/pose_sheet.py
+            /opt/blender/blender -b --factory-startup --python-use-system-env --python blender/pose_sheet.py
       - name: Legend
         if: ${{ !cancelled() && hashFiles('poses/sheet.md') != '' }}
         run: |

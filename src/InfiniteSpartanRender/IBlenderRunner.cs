@@ -36,6 +36,11 @@ public sealed class RenderOptions
 
 public sealed class BlenderRunner(IOptions<RenderOptions> options) : IBlenderRunner
 {
+    // Blender's Python ignores PYTHON* variables unless told otherwise; with them, PYTHONPYCACHEPREFIX can move the
+    // bytecode off a read-only root instead of each import trying to mkdir __pycache__ beside the add-on.
+    public static string[] Arguments(string scriptPath, string loadoutPath, string outputPath) =>
+        ["-b", "--factory-startup", "--python-use-system-env", "--python", scriptPath, "--", loadoutPath, outputPath];
+
     public async Task RunAsync(Loadout loadout, string outputPath, CancellationToken cancellationToken)
     {
         var o = options.Value;
@@ -51,7 +56,7 @@ public sealed class BlenderRunner(IOptions<RenderOptions> options) : IBlenderRun
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
-            foreach (var arg in new[] { "-b", "--factory-startup", "--python", o.ScriptPath, "--", loadoutPath, outputPath })
+            foreach (var arg in Arguments(o.ScriptPath, loadoutPath, outputPath))
                 start.ArgumentList.Add(arg);
             start.Environment["HOME"] = work;
             start.Environment["ISR_DATA"] = o.DataDirectory;
