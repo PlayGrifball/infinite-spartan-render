@@ -71,6 +71,13 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"core":"","output":"png","size":"small"}' http://localhost:18080/spartans)" = 400
           docker exec -e HOME=/tmp isr /opt/blender/blender -b --factory-startup --python-expr 'import addon_utils; addon_utils.enable("bl_ext.user_default.ekur", default_set=True); import bpy; assert hasattr(bpy.types.Scene, "spartan_properties"), "Ekur did not register"; print("EKUR OK")' | tee /dev/stderr | grep -q "EKUR OK"
           docker rm -f isr
+          # The baked extensions compat cache must still be current in the built image: if enabling Ekur rewrites it,
+          # every container tries that write on its read-only root. Root, so the write would succeed and show.
+          docker run --rm --user 0 -e HOME=/tmp --entrypoint sh "$first" -c '
+            c=/opt/blenderhome/.config/blender/5.0/extensions/.cache/compat.dat
+            before="$(md5sum "$c")"
+            /opt/blender/blender -b --factory-startup --python-expr "import addon_utils; addon_utils.enable(\"bl_ext.user_default.ekur\", default_set=True)" >/dev/null 2>&1
+            test "$before" = "$(md5sum "$c")" || { echo "::error::Enabling Ekur rewrote the baked compat cache"; exit 1; }'
 
       - name: Install cosign
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

@@ -23,7 +23,9 @@ RUN cd /opt/ekur/addon && HOME=/tmp/h /opt/blender/blender --command extension b
 COPY blender/bake.py /tmp/bake.py
 RUN HOME=/opt/blenderhome /opt/blender/blender -b --python /tmp/bake.py
 # Enable Ekur once as spartan.py does, so the extensions' compat cache (.cache/compat.dat) is already current: otherwise
-# the first enable in each container rewrites it, which fails on a read-only root.
+# the first enable in each container rewrites it, which fails on a read-only root. The cache keeps the manifest's mtime
+# to the nanosecond, and copying into the later stages keeps only whole seconds, so round every mtime down first.
+RUN find /opt/blenderhome -exec sh -c 'for f; do touch -h -m -d "@$(stat -c %Y "$f")" "$f"; done' _ {} +
 RUN BLENDER_USER_RESOURCES=/opt/blenderhome/.config/blender/5.0 HOME=/tmp/h /opt/blender/blender -b --factory-startup \
     --python-expr 'import addon_utils; addon_utils.enable("bl_ext.user_default.ekur", default_set=True)' \
     && chmod -R a+rX /opt/blenderhome
