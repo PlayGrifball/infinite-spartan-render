@@ -483,3 +483,21 @@ def test_a_tag_listed_for_two_weapons_means_the_first():
     weapons = [{"name": "A", "tags": [5]}, {"name": "B", "tags": [5]}]
 
     assert rig.pose_clips([{"pose": "P", "stance": 1, "weaponTag": 5}], weapons) == [("P", 1, "A")]
+
+
+def test_a_weapons_rest_is_its_own_transform_not_a_world_matrix_blender_has_not_updated():
+    # Ekur gives each imported mesh its 3.048 scale on the object; its world matrix stays identity until the
+    # view layer updates, so a rest read from it would hold the weapon at a third of its size
+    class Matrix:
+        def __init__(self, scale):
+            self.scale = scale
+
+        def copy(self):
+            return Matrix(self.scale)
+
+    part = SimpleNamespace(matrix_basis=Matrix(3.048), matrix_world=Matrix(1.0))
+
+    rests = rig.weapon_rests([part])
+
+    assert rests[part].scale == 3.048
+    assert rests[part] is not part.matrix_basis
