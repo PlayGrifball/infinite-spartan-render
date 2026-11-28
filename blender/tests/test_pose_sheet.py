@@ -21,8 +21,8 @@ def test_a_pose_is_rendered_as_a_mark_vii_body_holding_its_weapon():
 def test_each_render_runs_the_render_script_in_the_background():
     cmd = pose_sheet.command("/opt/blender/blender", Path("a.json"), Path("a.png"))
 
-    assert cmd[:3] == ["/opt/blender/blender", "-b", "--factory-startup"]
-    assert cmd[4].endswith("spartan.py") and cmd[-2:] == ["a.json", "a.png"]
+    assert cmd[:4] == ["/opt/blender/blender", "-b", "--factory-startup", "--python-use-system-env"]
+    assert cmd[5].endswith("spartan.py") and cmd[-2:] == ["a.json", "a.png"]
 
 
 def test_renders_fill_the_sheet_row_by_row():

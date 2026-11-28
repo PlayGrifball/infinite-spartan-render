@@ -25,7 +25,9 @@ def model_loadout(all_poses):
 
 
 def command(blender, loadout_path, png):
-    return [blender, "-b", "--factory-startup", "--python", str(HERE / "spartan.py"), "--", str(loadout_path), str(png)]
+    # With the system env, as the service runs it: PYTHONPYCACHEPREFIX keeps bytecode off a read-only root
+    return [blender, "-b", "--factory-startup", "--python-use-system-env", "--python", str(HERE / "spartan.py"), "--",
+            str(loadout_path), str(png)]
 
 
 def layout(count, columns=COLUMNS):
